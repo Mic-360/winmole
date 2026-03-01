@@ -17,7 +17,10 @@ if (-not $script:WIMO_VERSION) {
 # Whitelist management mode
 if ($Whitelist) {
     Show-Banner -Compact
-    Write-ColorLine "  $($C.Bold)Whitelist Management$($C.Reset)" -Color $C.White
+    Write-WimoCard -Title "Whitelist Management" -AccentColor $C.Cyan -Lines @(
+        "  Manage protected paths that WiMo should never clean.",
+        "  Add carefully: broad paths may skip useful cleanup targets."
+    ) -ShowBottomBorder
     Write-Host ""
 
     $config = Get-WimoConfig
@@ -124,10 +127,10 @@ function Remove-WindowsOld {
     $sizeText = Format-FileSize $size
 
     Write-Host ""
-    Write-Host "  $($C.Grey)┌─ Previous Windows Installation ─────────────────────────────┐$($C.Reset)"
-    Write-Host "  $($C.Grey)│$($C.Reset)  $($C.Orange)⚠$($C.Reset)  C:\Windows.old  ·  $($C.Bold)$sizeText$($C.Reset)  ·  Safe to remove          $($C.Grey)│$($C.Reset)"
-    Write-Host "  $($C.Grey)│$($C.Reset)     Removes the ability to roll back to previous Windows     $($C.Grey)│$($C.Reset)"
-    Write-Host "  $($C.Grey)└──────────────────────────────────────────────────────────────┘$($C.Reset)"
+    Write-WimoCard -Title "Previous Windows Installation" -AccentColor $C.Orange -Lines @(
+        "  ⚠  C:\Windows.old  ·  $sizeText  ·  Safe to remove",
+        "  Removing it disables rollback to the previous Windows version."
+    ) -ShowBottomBorder
 
     if ($DryRun) {
         Show-ScanItem -Status Warn -Label "windows.old" -Size $sizeText -Badge "dry-run: would remove via DISM"
@@ -156,11 +159,17 @@ function Remove-WindowsOld {
 Show-Banner -Compact
 
 if ($DryRun) {
-    Write-ColorLine "  $($C.Orange)DRY RUN$($C.Reset) — Previewing cleanup plan (nothing will be deleted)" -Color $C.Orange
+    Write-WimoCard -Title "Dry Run Mode" -AccentColor $C.Orange -Lines @(
+        "  Previewing cleanup plan only.",
+        "  No files or folders will be deleted in this run."
+    ) -ShowBottomBorder
     Write-Host ""
 }
 
-Write-ColorLine "  $($C.Bold)🧹 WiMo Clean  ·  Scanning system...$($C.Reset)" -Color $C.White
+Write-WimoCard -Title "WiMo Clean" -AccentColor $C.SageLight -Lines @(
+    "  Scanning user and system cache locations...",
+    "  Results stream below with size estimates and action badges."
+) -ShowBottomBorder
 Write-Host ""
 
 $totalFreed = [long]0
@@ -169,7 +178,9 @@ $isAdmin = Test-IsAdmin
 $config = Get-WimoConfig
 
 # ── Phase 1: Parallel scan user-level targets ──────────────────
-Write-ColorLine "  $($C.Cyan)User-level caches:$($C.Reset)" -Color $C.Cyan
+Write-WimoCard -Title "User-level Caches" -AccentColor $C.Cyan -Lines @(
+    "  Safe user-space targets that do not require admin privileges."
+) -ShowBottomBorder
 Write-Host ""
 
 $poolSize = [Math]::Min([Math]::Max(1, $CleanTargets.Count), [Environment]::ProcessorCount * 2)
@@ -280,7 +291,9 @@ if (-not $DryRun -and $userCleanItems.Count -gt 0) {
 
 # ── Phase 2: Parallel scan admin-level targets ──────────────────
 Write-Host ""
-Write-ColorLine "  $($C.Cyan)System-level caches:$($C.Reset)" -Color $C.Cyan
+Write-WimoCard -Title "System-level Caches" -AccentColor $C.Cyan -Lines @(
+    "  Elevated cleanup targets (admin required for deletion)."
+) -ShowBottomBorder
 Write-Host ""
 
 if ($isAdmin) {
@@ -392,10 +405,10 @@ if ($isAdmin -or $DryRun) {
 } else {
     if (Test-Path $WindowsOldPath) {
         $woSize = Get-FolderSize $WindowsOldPath
-        Write-Host "  $($C.Grey)┌─ Previous Windows Installation ─────────────────────────────┐$($C.Reset)"
-        Write-Host "  $($C.Grey)│$($C.Reset)  $($C.Orange)⚠$($C.Reset)  C:\Windows.old  ·  $($C.Bold)$(Format-FileSize $woSize)$($C.Reset)                         $($C.Grey)│$($C.Reset)"
-        Write-Host "  $($C.Grey)│$($C.Reset)     Run as Administrator to remove                          $($C.Grey)│$($C.Reset)"
-        Write-Host "  $($C.Grey)└──────────────────────────────────────────────────────────────┘$($C.Reset)"
+        Write-WimoCard -Title "Previous Windows Installation" -AccentColor $C.Orange -Lines @(
+            "  ⚠  C:\Windows.old  ·  $(Format-FileSize $woSize)",
+            "  Run as Administrator to remove this item."
+        ) -ShowBottomBorder
     }
 }
 
