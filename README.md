@@ -50,14 +50,16 @@ Built with PowerShell and Go for a fast, colorful terminal experience with a per
 
 - **Split-pane persistent menu** — left navigation panel + right context panel; menu stays visible and returns after every command
 - **Interactive TUI** — vim-style navigation (`j`/`k`), checkboxes, progress bars, responsive box-drawing layout
-- **Modern Go dashboards** — card-based status TUI with sage green Catppuccin palette, responsive breakpoints, health score badge
+- **Modern Go dashboards** — card-based status and analyze TUI with muted Catppuccin-inspired palette, responsive breakpoints, health score badge
 - **.NET-accelerated I/O** — `System.IO.Directory.EnumerateFiles/EnumerateDirectories` replaces `Get-ChildItem` for fast scanning
 - **Parallel execution** — runspace pools for concurrent size calculation and deletion in `clean` and `purge`
 - **4-layer safe delete** — protected paths, user data patterns, recycle bin fallback, dry-run preview
 - **28+ cleanup targets** — user-level caches, browser data, package managers, dev tools
 - **Smart uninstaller** — merges apps from Windows Registry, winget, and local programs into one list
+- **Resilient uninstall selection** — automatic fallback command input mode when raw key capture is unavailable in the terminal
 - **Admin-aware** — badges admin-required tasks, skips them gracefully when running as standard user
 - **ANSI color output** — 256-color palette with sage green branding, works on Windows 10+ terminals
+- **Robust hardware detection** — status mode uses WMIC + CIM fallback for GPU and battery telemetry on more Windows setups
 - **Winget ready** — includes a winget manifest for package distribution
 
 ## Usage
@@ -129,6 +131,12 @@ For detailed installation options, build-from-source instructions, and troublesh
 - **Windows 10** version 1809+ (for ANSI/VT100 terminal support)
 - **PowerShell 5.1+** (ships with Windows) or PowerShell 7+
 - **Go 1.24+** (optional — only needed to build the `analyze` and `status` TUI binaries)
+
+## Terminal Compatibility
+
+- Recommended: **Windows Terminal** or **PowerShell 7+** terminal hosts
+- Supported: **VS Code integrated terminal**
+- If raw key mode is unavailable for interactive selection, WiMo now automatically switches to command input mode (`j/k/up/down/space/enter/a/n/q`).
 
 ## Project Structure
 
