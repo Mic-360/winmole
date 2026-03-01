@@ -170,7 +170,7 @@ function Find-Artifacts {
     }
 
     # Parallel size calculation using runspace pool
-    $poolSize = [Math]::Min(16, [Math]::Max(1, $candidates.Count))
+    $poolSize = [Math]::Min([Math]::Max(1, $candidates.Count), [Environment]::ProcessorCount * 2)
     $pool = [runspacefactory]::CreateRunspacePool(1, $poolSize)
     $pool.Open()
 
@@ -351,7 +351,7 @@ $freedTotal = [long]0
 $removedCount = 0
 
 # Parallel deletion using runspace pool for speed
-$delPool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min(8, $selectedArtifacts.Count))
+$delPool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min([Environment]::ProcessorCount * 2, [Math]::Max(1, $selectedArtifacts.Count)))
 $delPool.Open()
 
 $delJobs = @()
