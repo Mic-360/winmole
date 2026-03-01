@@ -16,28 +16,28 @@ $script:C = @{
     Dim       = "$([char]0x1b)[2m"
 
     # Brand colors
-    Orange    = "$([char]0x1b)[38;5;208m"
+    Orange    = "$([char]0x1b)[38;5;180m"
     Brown     = "$([char]0x1b)[38;5;130m"
     DarkBrown = "$([char]0x1b)[38;5;94m"
-    Yellow    = "$([char]0x1b)[38;5;226m"
+    Yellow    = "$([char]0x1b)[38;5;229m"
     Tan       = "$([char]0x1b)[38;5;180m"
     SageGreen = "$([char]0x1b)[38;5;108m"
     SageLight = "$([char]0x1b)[38;5;151m"
     Rose      = "$([char]0x1b)[38;5;174m"
 
     # UI colors
-    Green     = "$([char]0x1b)[38;5;82m"
-    Red       = "$([char]0x1b)[38;5;196m"
-    Cyan      = "$([char]0x1b)[38;5;51m"
+    Green     = "$([char]0x1b)[38;5;114m"
+    Red       = "$([char]0x1b)[38;5;174m"
+    Cyan      = "$([char]0x1b)[38;5;109m"
     Blue      = "$([char]0x1b)[38;5;39m"
     Purple    = "$([char]0x1b)[38;5;141m"
-    Grey      = "$([char]0x1b)[38;5;245m"
+    Grey      = "$([char]0x1b)[38;5;244m"
     White     = "$([char]0x1b)[38;5;255m"
     LightGrey = "$([char]0x1b)[38;5;250m"
 
     # Backgrounds
-    BgSelected = "$([char]0x1b)[48;5;235m"
-    BgHeader   = "$([char]0x1b)[48;5;232m"
+    BgSelected = "$([char]0x1b)[48;5;237m"
+    BgHeader   = "$([char]0x1b)[48;5;236m"
 }
 
 # Protected paths that must NEVER be deleted
