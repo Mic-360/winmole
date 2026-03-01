@@ -235,7 +235,7 @@ function Show-Checkbox {
             Write-Host "  $($C.Grey)├$('─' * ($boxWidth - 2))┤$($C.Reset)"
 
             # Determine visible window (scroll if > 15 items)
-            $maxVisible = [Math]::Min($Items.Count, 15)
+            $maxVisible = [Math]::Min($Items.Count, 20)
             $scrollStart = [Math]::Max(0, [Math]::Min($cursor - [Math]::Floor($maxVisible / 2), $Items.Count - $maxVisible))
 
             for ($i = $scrollStart; $i -lt [Math]::Min($scrollStart + $maxVisible, $Items.Count); $i++) {
@@ -252,7 +252,10 @@ function Show-Checkbox {
                 foreach ($col in $Columns) {
                     $val = $item[$col.Key]
                     if ($null -eq $val) { $val = "" }
-                    $line += "$($val.ToString().PadRight($col.Width))   "
+                    $valStr = $val.ToString()
+                    $plainLen = ($valStr -replace "$([char]0x1b)\[[0-9;]*m", '').Length
+                    $padNeeded = [Math]::Max(0, $col.Width - $plainLen)
+                    $line += "$valStr$(' ' * $padNeeded)   "
                 }
 
                 if ($isSelected) {
