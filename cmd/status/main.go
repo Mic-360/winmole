@@ -81,6 +81,7 @@ type batteryInfo struct {
 	percent   int
 	charging  bool
 	present   bool
+	status    string
 }
 
 type diskPartInfo struct {
@@ -330,11 +331,42 @@ func gatherStats(prev systemStats) systemStats {
 
 func getGPUs() []gpuInfo {
 	out, err := exec.Command("wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv").CombinedOutput()
-	if err != nil {
+	if err == nil {
+		if gpus := parseGpuCSV(string(out)); len(gpus) > 0 {
+			return gpus
+		}
+	}
+
+	// Fallback: CIM via PowerShell (works when WMIC output is unavailable/malformed)
+	psScript := "Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | ForEach-Object { \"{0}|{1}|{2}\" -f $_.Name, $_.AdapterRAM, $_.DriverVersion }"
+	psOut, psErr := exec.Command("powershell", "-NoProfile", "-Command", psScript).CombinedOutput()
+	if psErr != nil {
 		return nil
 	}
+
 	var gpus []gpuInfo
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(string(psOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 {
+			continue
+		}
+		vramBytes, _ := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		gpus = append(gpus, gpuInfo{
+			name:   strings.TrimSpace(parts[0]),
+			vram:   formatBytes(uint64(maxInt64(vramBytes, 0))),
+			driver: strings.TrimSpace(parts[2]),
+		})
+	}
+	return gpus
+}
+
+func parseGpuCSV(raw string) []gpuInfo {
+	var gpus []gpuInfo
+	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Node") {
 			continue
@@ -343,10 +375,11 @@ func getGPUs() []gpuInfo {
 		if len(parts) < 4 {
 			continue
 		}
-		vramBytes, _ := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
-		vram := formatBytes(uint64(vramBytes))
+		// WMIC CSV columns: Node,Name,AdapterRAM,DriverVersion
+		vramBytes, _ := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+		vram := formatBytes(uint64(maxInt64(vramBytes, 0)))
 		gpus = append(gpus, gpuInfo{
-			name:   strings.TrimSpace(parts[2]),
+			name:   strings.TrimSpace(parts[1]),
 			driver: strings.TrimSpace(parts[3]),
 			vram:   vram,
 		})
@@ -356,10 +389,43 @@ func getGPUs() []gpuInfo {
 
 func getBattery() batteryInfo {
 	out, err := exec.Command("wmic", "path", "Win32_Battery", "get", "EstimatedChargeRemaining,BatteryStatus", "/format:csv").CombinedOutput()
-	if err != nil {
+	if err == nil {
+		if b, ok := parseBatteryCSV(string(out)); ok {
+			return b
+		}
+	}
+
+	// Fallback: CIM via PowerShell
+	psScript := "$b = Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1 EstimatedChargeRemaining,BatteryStatus; if ($null -eq $b) { 'NONE' } else { \"{0}|{1}\" -f $b.EstimatedChargeRemaining, $b.BatteryStatus }"
+	psOut, psErr := exec.Command("powershell", "-NoProfile", "-Command", psScript).CombinedOutput()
+	if psErr != nil {
 		return batteryInfo{}
 	}
-	for _, line := range strings.Split(string(out), "\n") {
+
+	line := strings.TrimSpace(string(psOut))
+	if line == "" || strings.EqualFold(line, "NONE") {
+		return batteryInfo{}
+	}
+
+	parts := strings.Split(line, "|")
+	if len(parts) < 2 {
+		return batteryInfo{}
+	}
+
+	pct, _ := strconv.Atoi(strings.TrimSpace(parts[0]))
+	statusCode, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+	statusText, charging := mapBatteryStatus(statusCode, pct)
+
+	return batteryInfo{
+		percent:  clampInt(pct, 0, 100),
+		charging: charging,
+		present:  true,
+		status:   statusText,
+	}
+}
+
+func parseBatteryCSV(raw string) (batteryInfo, bool) {
+	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Node") {
 			continue
@@ -368,15 +434,56 @@ func getBattery() batteryInfo {
 		if len(parts) < 3 {
 			continue
 		}
-		status, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
-		pct, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+
+		// WMIC CSV columns: Node,EstimatedChargeRemaining,BatteryStatus
+		pct, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+		statusCode, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+		statusText, charging := mapBatteryStatus(statusCode, pct)
+
 		return batteryInfo{
-			percent:  pct,
-			charging: status == 2,
+			percent:  clampInt(pct, 0, 100),
+			charging: charging,
 			present:  true,
-		}
+			status:   statusText,
+		}, true
 	}
-	return batteryInfo{}
+
+	return batteryInfo{}, false
+}
+
+func mapBatteryStatus(code int, pct int) (string, bool) {
+	switch code {
+	case 6, 7, 8, 9:
+		return "Charging", true
+	case 3:
+		return "Fully charged", false
+	case 1, 4, 5, 11:
+		return "Discharging", false
+	case 2:
+		if pct >= 95 {
+			return "Connected (full)", false
+		}
+		return "Connected (not charging)", false
+	default:
+		return "Unknown", false
+	}
+}
+
+func clampInt(v int, minV int, maxV int) int {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+func maxInt64(v int64, minV int64) int64 {
+	if v < minV {
+		return minV
+	}
+	return v
 }
 
 func getSystemModel() (string, string) {
@@ -722,17 +829,25 @@ func (m model) viewBattery(w, gw int) string {
 		lines = append(lines,
 			dimStyle.Render("No battery detected"),
 			"",
-			dimStyle.Render("Desktop/AC powered"),
+			dimStyle.Render("Battery telemetry unavailable"),
 		)
 	} else {
 		pct := float64(s.battery.percent)
-		status := "Discharging"
-		if s.battery.charging {
-			status = "Charging"
+		status := s.battery.status
+		if status == "" {
+			status = "Unknown"
 		}
+
+		statusStyle := valueStyle
+		if s.battery.charging {
+			statusStyle = greenStyle
+		} else if strings.Contains(strings.ToLower(status), "discharg") {
+			statusStyle = yellowStyle
+		}
+
 		lines = append(lines,
 			labelStyle.Render("Level  ")+bar(pct, gw)+valueStyle.Render(fmt.Sprintf(" %d%%", s.battery.percent)),
-			labelStyle.Render("Status ")+valueStyle.Render(status),
+			labelStyle.Render("Status ")+statusStyle.Render(status),
 		)
 	}
 	return newCardStyle(w).Render(strings.Join(lines, "\n"))
