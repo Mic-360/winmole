@@ -15,91 +15,132 @@ function Confirm-Action {
     return ($response -match '^[Yy]')
 }
 
+function Get-DisplayWidth {
+    <#
+    .SYNOPSIS
+        Returns the terminal display width of a string, accounting for
+        double-width emoji/CJK characters and stripping ANSI escapes.
+    #>
+    param([string]$Text)
+    # Strip ANSI escape codes first
+    $plain = $Text -replace "$([char]0x1b)\[[0-9;]*m", ''
+    [int]$w = 0
+    $i = 0
+    while ($i -lt $plain.Length) {
+        $c = [int][char]$plain[$i]
+        # Surrogate pair (emoji/supplementary plane) — display width 2
+        if ($c -ge 0xD800 -and $c -le 0xDBFF) {
+            $w += 2
+            $i += 2  # skip low surrogate
+            continue
+        }
+        # Variation selectors (U+FE0E, U+FE0F) — zero width
+        if ($c -eq 0xFE0E -or $c -eq 0xFE0F) {
+            $i++
+            continue
+        }
+        # Common double-width: box-drawing heavy, CJK, fullwidth, etc.
+        if (($c -ge 0x1100 -and $c -le 0x115F) -or   # Hangul Jamo
+            ($c -ge 0x2E80 -and $c -le 0x9FFF) -or   # CJK
+            ($c -ge 0xF900 -and $c -le 0xFAFF) -or   # CJK compat
+            ($c -ge 0xFE30 -and $c -le 0xFE6F) -or   # CJK forms
+            ($c -ge 0xFF00 -and $c -le 0xFF60) -or   # Fullwidth
+            ($c -ge 0xFFE0 -and $c -le 0xFFE6)) {    # Fullwidth signs
+            $w += 2
+        } else {
+            $w += 1
+        }
+        $i++
+    }
+    return $w
+}
+
 function Show-InteractiveMenu {
     <#
     .SYNOPSIS
         Main interactive menu with mole ASCII logo and navigable options.
     #>
 
+    # Use simple ASCII icons for consistent column width
     $menuItems = @(
-        @{ Icon = "🧹"; Label = "Clean System";    Desc = "Free disk space";          Command = "clean" }
-        @{ Icon = "🗑️"; Label = "Uninstall Apps";   Desc = "Remove + leftovers";        Command = "uninstall" }
-        @{ Icon = "⚡"; Label = "Optimize System";  Desc = "Speed & refresh";           Command = "optimize" }
-        @{ Icon = "📁"; Label = "Analyze Disk";     Desc = "Visual explorer";           Command = "analyze" }
-        @{ Icon = "📊"; Label = "Live Status";      Desc = "Health dashboard";          Command = "status" }
-        @{ Icon = "🔥"; Label = "Purge Projects";   Desc = "Dev artifact junk";         Command = "purge" }
+        @{ Icon = "[~]"; Label = "Clean System";    Desc = "Free disk space";     Command = "clean" }
+        @{ Icon = "[-]"; Label = "Uninstall Apps";   Desc = "Remove + leftovers";   Command = "uninstall" }
+        @{ Icon = "[*]"; Label = "Optimize System";  Desc = "Speed & refresh";      Command = "optimize" }
+        @{ Icon = "[+]"; Label = "Analyze Disk";     Desc = "Visual explorer";      Command = "analyze" }
+        @{ Icon = "[=]"; Label = "Live Status";      Desc = "Health dashboard";     Command = "status" }
+        @{ Icon = "[!]"; Label = "Purge Projects";   Desc = "Dev artifact junk";    Command = "purge" }
     )
 
     $selected = 0
     $running = $true
 
-    # Show the full banner once
     Show-Banner
 
     [Console]::CursorVisible = $false
 
     try {
-        # Save cursor position after banner
         $menuTop = [Console]::CursorTop
 
         while ($running) {
-            # Move cursor back to menu start
             [Console]::SetCursorPosition(0, $menuTop)
 
             $width = Get-TerminalWidth
-            $boxWidth = [Math]::Min(55, $width - 4)
+            $boxWidth = [Math]::Min(58, $width - 4)
             $padLeft = [Math]::Max(0, [Math]::Floor(($width - $boxWidth) / 2))
             $pad = ' ' * $padLeft
-            $innerWidth = $boxWidth - 4
+            $inner = $boxWidth - 2  # usable chars between │ and │
 
             # Top border
-            Write-Host "$pad$($C.Grey)┌$('─' * ($boxWidth - 2))┐$($C.Reset)"
+            Write-Host "$pad$($C.Grey)╭$('─' * $inner)╮$($C.Reset)"
 
-            # Header
-            $header = "  🐹 WiMo  ·  Windows System Optimizer"
-            $headerPad = $innerWidth - 38
-            if ($headerPad -lt 0) { $headerPad = 0 }
-            Write-Host "$pad$($C.Grey)│$($C.Reset)  $($C.Bold)$($C.Orange)$header$($C.Reset)$(' ' * $headerPad)$($C.Grey)│$($C.Reset)"
+            # Header — fixed known content
+            $hdrText = "  WiMo  ·  Windows System Optimizer"
+            $hdrFill = [Math]::Max(0, $inner - $hdrText.Length)
+            Write-Host "$pad$($C.Grey)│$($C.Reset)$($C.Bold)$($C.Orange)$hdrText$($C.Reset)$(' ' * $hdrFill)$($C.Grey)│$($C.Reset)"
 
             # Separator
-            Write-Host "$pad$($C.Grey)├$('─' * ($boxWidth - 2))┤$($C.Reset)"
+            Write-Host "$pad$($C.Grey)├$('─' * $inner)┤$($C.Reset)"
 
             # Empty line
-            Write-Host "$pad$($C.Grey)│$($C.Reset)$(' ' * ($boxWidth - 2))$($C.Grey)│$($C.Reset)"
+            Write-Host "$pad$($C.Grey)│$(' ' * $inner)│$($C.Reset)"
 
             # Menu items
             for ($i = 0; $i -lt $menuItems.Count; $i++) {
                 $item = $menuItems[$i]
+                # Build the visible content and calculate its display columns
                 if ($i -eq $selected) {
-                    $arrow = "$($C.Green)▶$($C.Reset)"
-                    $label = "$($C.Bold)$($C.White)$($C.BgSelected)  $($item.Icon)  $($item.Label)"
-                    $desc = "$($item.Desc)$($C.Reset)"
-                    $lineText = "$arrow $label    $desc"
-                    $rawLen = 6 + $item.Icon.Length + $item.Label.Length + 4 + $item.Desc.Length
+                    $icon = "$($C.SageGreen)$($item.Icon)$($C.Reset)"
+                    $prefix = " $($C.Green)>$($C.Reset) "
+                    $labelPart = "$($C.Bold)$($C.White)$($item.Label)$($C.Reset)"
+                    $descPart = "$($C.SageLight)$($item.Desc)$($C.Reset)"
+                    $visibleLen = 3 + $item.Icon.Length + 2 + $item.Label.Length + 4 + $item.Desc.Length
+                    $lineText = "$prefix$icon  $labelPart    $descPart"
                 } else {
-                    $label = "$($C.Grey)     $($item.Icon)  $($item.Label)"
-                    $desc = "$($item.Desc)$($C.Reset)"
-                    $lineText = "$label    $desc"
-                    $rawLen = 5 + $item.Icon.Length + $item.Label.Length + 4 + $item.Desc.Length
+                    $icon = "$($C.Grey)$($item.Icon)$($C.Reset)"
+                    $prefix = "   "
+                    $labelPart = "$($C.Grey)$($item.Label)$($C.Reset)"
+                    $descPart = "$($C.Grey)$($item.Desc)$($C.Reset)"
+                    $visibleLen = 3 + $item.Icon.Length + 2 + $item.Label.Length + 4 + $item.Desc.Length
+                    $lineText = "$prefix$icon  $labelPart    $descPart"
                 }
 
-                $fill = [Math]::Max(0, $boxWidth - 4 - $rawLen)
-                Write-Host "$pad$($C.Grey)│$($C.Reset)  $lineText$(' ' * $fill)$($C.Grey)│$($C.Reset)"
+                $fill = [Math]::Max(0, $inner - $visibleLen)
+                Write-Host "$pad$($C.Grey)│$($C.Reset)$lineText$(' ' * $fill)$($C.Grey)│$($C.Reset)"
             }
 
             # Empty line
-            Write-Host "$pad$($C.Grey)│$($C.Reset)$(' ' * ($boxWidth - 2))$($C.Grey)│$($C.Reset)"
+            Write-Host "$pad$($C.Grey)│$(' ' * $inner)│$($C.Reset)"
 
             # Separator
-            Write-Host "$pad$($C.Grey)├$('─' * ($boxWidth - 2))┤$($C.Reset)"
+            Write-Host "$pad$($C.Grey)├$('─' * $inner)┤$($C.Reset)"
 
             # Footer
-            $footer = "  ↑↓ / jk navigate  ·  Enter select  ·  q quit"
-            $footerPad = [Math]::Max(0, $boxWidth - 2 - $footer.Length)
-            Write-Host "$pad$($C.Grey)│$footer$(' ' * $footerPad)│$($C.Reset)"
+            $footerText = "  up/down navigate  ·  Enter select  ·  q quit"
+            $footerFill = [Math]::Max(0, $inner - $footerText.Length)
+            Write-Host "$pad$($C.Grey)│$footerText$(' ' * $footerFill)│$($C.Reset)"
 
             # Bottom border
-            Write-Host "$pad$($C.Grey)└$('─' * ($boxWidth - 2))┘$($C.Reset)"
+            Write-Host "$pad$($C.Grey)╰$('─' * $inner)╯$($C.Reset)"
 
             # Read key input
             $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
