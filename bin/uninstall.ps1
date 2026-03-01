@@ -68,10 +68,14 @@ function Get-WingetApps {
 
             $cols = $line -split '\s{2,}'
             if ($cols.Count -ge 2) {
+                $ansi = "$([char]0x1b)\[[0-9;]*m"
+                $name = ($cols[0].Trim()) -replace $ansi, ''
+                $name = $name.Trim()
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
                 $apps += @{
-                    Name    = $cols[0].Trim()
-                    Id      = if ($cols.Count -ge 2) { $cols[1].Trim() } else { "" }
-                    Version = if ($cols.Count -ge 3) { $cols[2].Trim() } else { "" }
+                    Name    = $name
+                    Id      = if ($cols.Count -ge 2) { ($cols[1].Trim()) -replace $ansi, '' } else { "" }
+                    Version = if ($cols.Count -ge 3) { ($cols[2].Trim()) -replace $ansi, '' } else { "" }
                     Source  = "winget"
                 }
             }
@@ -104,17 +108,24 @@ function Get-LocalApps {
 function Merge-AppLists {
     param($RegistryApps, $WingetApps, $LocalApps)
 
+    # Broad pattern: strip all ANSI CSI sequences (ESC[ ... letter) plus remaining control chars
+    $ansiPattern = "$([char]0x1b)\[[^a-zA-Z]*[a-zA-Z]"
+    $ctrlPattern = '[\x00-\x1F\x7F-\x9F]'
     $merged = @{}
 
     # Registry apps as base
     foreach ($app in $RegistryApps) {
-        $key = $app.Name.ToLower().Trim()
+        $rawName = (([string]$app.Name) -replace $ansiPattern, '') -replace $ctrlPattern, ''
+        if ([string]::IsNullOrWhiteSpace($rawName)) { continue }
+        $key = $rawName.ToLower().Trim()
         $merged[$key] = $app
     }
 
     # Enrich with winget IDs
     foreach ($wApp in $WingetApps) {
-        $key = $wApp.Name.ToLower().Trim()
+        $rawName = (([string]$wApp.Name) -replace $ansiPattern, '') -replace $ctrlPattern, ''
+        if ([string]::IsNullOrWhiteSpace($rawName)) { continue }
+        $key = $rawName.ToLower().Trim()
         if ($merged.ContainsKey($key)) {
             $merged[$key].WingetId = $wApp.Id
             $merged[$key].Source = "winget"
@@ -136,7 +147,9 @@ function Merge-AppLists {
 
     # Add local apps not already found
     foreach ($lApp in $LocalApps) {
-        $key = $lApp.Name.ToLower().Trim()
+        $rawName = (([string]$lApp.Name) -replace $ansiPattern, '') -replace $ctrlPattern, ''
+        if ([string]::IsNullOrWhiteSpace($rawName)) { continue }
+        $key = $rawName.ToLower().Trim()
         if (-not $merged.ContainsKey($key)) {
             $merged[$key] = @{
                 Name               = $lApp.Name
