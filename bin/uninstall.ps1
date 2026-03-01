@@ -349,7 +349,17 @@ $regPs = [powershell]::Create().AddScript({
             }
         }
     }
-    return ,$apps
+    # Dedup by DisplayName (same app appears in HKLM, HKCU, WOW6432Node)
+    $seen = @{}
+    $unique = @()
+    foreach ($a in $apps) {
+        $k = ([string]$a.Name).ToLower().Trim()
+        if ($k -and -not $seen.ContainsKey($k)) {
+            $seen[$k] = $true
+            $unique += $a
+        }
+    }
+    return ,$unique
 })
 $regPs.RunspacePool = $scanPool
 $regHandle = $regPs.BeginInvoke()
@@ -375,16 +385,31 @@ $wingetPs = [powershell]::Create().AddScript({
             if ($line -match '^\d+ upgrades available') { continue }
             $cols = $line -split '\s{2,}'
             if ($cols.Count -ge 2) {
+                $ansi = "$([char]0x1b)\[[0-9;]*m"
+                $name = ($cols[0].Trim()) -replace $ansi, ''
+                $name = $name.Trim()
+                if ([string]::IsNullOrWhiteSpace($name)) { continue }
                 $apps += @{
-                    Name    = $cols[0].Trim()
-                    Id      = if ($cols.Count -ge 2) { $cols[1].Trim() } else { "" }
-                    Version = if ($cols.Count -ge 3) { $cols[2].Trim() } else { "" }
+                    Name    = $name
+                    Id      = if ($cols.Count -ge 2) { ($cols[1].Trim()) -replace $ansi, '' } else { "" }
+                    Version = if ($cols.Count -ge 3) { ($cols[2].Trim()) -replace $ansi, '' } else { "" }
                     Source  = "winget"
                 }
             }
         }
     } catch {}
-    return ,$apps
+    # Dedup by normalized name
+    $ansiRx = "$([char]0x1b)\[[^a-zA-Z]*[a-zA-Z]"
+    $seen = @{}
+    $unique = @()
+    foreach ($a in $apps) {
+        $k = (([string]$a.Name) -replace $ansiRx, '' -replace '[\x00-\x1F\x7F-\x9F]', '').ToLower().Trim()
+        if ($k -and -not $seen.ContainsKey($k)) {
+            $seen[$k] = $true
+            $unique += $a
+        }
+    }
+    return ,$unique
 })
 $wingetPs.RunspacePool = $scanPool
 $wingetHandle = $wingetPs.BeginInvoke()
@@ -452,6 +477,15 @@ Write-Host "  $($C.Grey)Scan completed in $($sw.ElapsedMilliseconds)ms$($C.Reset
 Write-Host ""
 
 $allApps = Merge-AppLists -RegistryApps $registryApps -WingetApps $wingetApps -LocalApps $localApps
+
+# Belt-and-suspenders dedup by normalized name (catches any edge cases the merge missed)
+$_ansiRx = "$([char]0x1b)\[[^a-zA-Z]*[a-zA-Z]"
+$_seenNames = @{}
+$allApps = @($allApps | Where-Object {
+    $raw = [string](Get-ScalarValue -Value $_.Name -Default "")
+    $n = (($raw -replace $_ansiRx, '') -replace '[\x00-\x1F\x7F-\x9F]', '').ToLower().Trim()
+    if ($n -and -not $_seenNames.ContainsKey($n)) { $_seenNames[$n] = $true; $true } else { $false }
+})
 
 if ($allApps.Count -eq 0) {
     Write-ColorLine "  No installed applications found." -Color $C.Grey
