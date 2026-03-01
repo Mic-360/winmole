@@ -141,18 +141,47 @@ $totalFreed = [long]0
 $totalItems = 0
 $isAdmin = Test-IsAdmin
 
-# Scan user-level targets
+# ── Parallel scan of user-level targets ──────────────────────
 Write-ColorLine "  $($C.Cyan)User-level caches:$($C.Reset)" -Color $C.Cyan
 Write-Host ""
 
 $config = Get-WimoConfig
 
-foreach ($target in $CleanTargets) {
-    $size = Get-PathSize $target.Path
+# Pre-scan sizes in parallel using runspaces for speed
+$pool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min(16, $CleanTargets.Count))
+$pool.Open()
 
-    if ($size -eq 0) {
-        continue  # Skip empty/non-existent targets silently
-    }
+$jobs = @()
+foreach ($target in $CleanTargets) {
+    $ps = [powershell]::Create().AddScript({
+        param($p)
+        [long]$total = 0
+        $items = Get-Item -Path $p -Force -ErrorAction SilentlyContinue
+        foreach ($item in $items) {
+            if ($item.PSIsContainer) {
+                try {
+                    foreach ($f in [System.IO.Directory]::EnumerateFiles($item.FullName, '*', [System.IO.SearchOption]::AllDirectories)) {
+                        try { $total += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                    }
+                } catch {}
+            } else {
+                $total += $item.Length
+            }
+        }
+        return $total
+    }).AddArgument($target.Path)
+    $ps.RunspacePool = $pool
+    $jobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Target = $target }
+}
+
+# Collect results and process
+foreach ($job in $jobs) {
+    $size = $job.Pipe.EndInvoke($job.Handle)
+    if ($null -eq $size) { $size = 0 } else { $size = [long]$size }
+    $job.Pipe.Dispose()
+    $target = $job.Target
+
+    if ($size -eq 0) { continue }
 
     $sizeText = Format-FileSize $size
     $totalItems++
@@ -179,7 +208,6 @@ foreach ($target in $CleanTargets) {
             Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $freed)
             $totalFreed += $freed
         } else {
-            # Try removing the directory contents
             $result = Remove-SafePath -Path $target.Path
             if ($result.Success) {
                 Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $result.BytesFreed)
@@ -190,6 +218,9 @@ foreach ($target in $CleanTargets) {
         }
     }
 }
+
+$pool.Close()
+$pool.Dispose()
 
 # Scan admin-level targets
 Write-Host ""
