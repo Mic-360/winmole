@@ -56,7 +56,7 @@ $ArtifactDirs = @{
     ".gradle"            = "Gradle cache"
 
     # Go
-    "vendor"             = "Go vendor"
+    "vendor"             = "Composer/Go vendor"
 
     # Flutter / Dart
     ".dart_tool"         = "Dart tool cache"
@@ -71,9 +71,18 @@ $ArtifactDirs = @{
     # Ruby
     ".bundle"            = "Bundler cache"
 
+    # .NET
+    "bin"                = "Build output"
+    "obj"                = "Build output"
+    "packages"           = "NuGet packages"
+
     # General
     ".DS_Store"          = "macOS metadata"
     "Thumbs.db"          = "Windows thumbnails"
+    ".sass-cache"        = "Sass cache"
+    ".angular"           = "Angular cache"
+    ".webpack"           = "Webpack cache"
+    "__generated__"      = "Generated code cache"
 }
 
 # Context-sensitive artifacts — only match if specific project files exist nearby
@@ -81,6 +90,8 @@ $ContextArtifacts = @{
     "dist"  = @{ Label = "Build output"; Indicators = @("package.json", "tsconfig.json", "setup.py", "pyproject.toml") }
     "build" = @{ Label = "Build output"; Indicators = @("package.json", "build.gradle", "pom.xml", "pubspec.yaml", "CMakeLists.txt") }
     "out"   = @{ Label = "Build output"; Indicators = @("package.json", "tsconfig.json", "next.config.js") }
+    "bin"   = @{ Label = ".NET build"; Indicators = @("*.csproj", "*.sln", "*.fsproj") }
+    "obj"   = @{ Label = ".NET obj"; Indicators = @("*.csproj", "*.sln", "*.fsproj") }
 }
 
 # Flutter-specific subdirectory artifacts
