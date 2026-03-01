@@ -73,6 +73,26 @@ $CleanTargets = @(
     @{ Label = "UWP app temp state";             Path = "$env:LOCALAPPDATA\Packages\*\TempState" }
     @{ Label = "Recent docs (jump list)";        Path = "$env:APPDATA\Microsoft\Windows\Recent\*" }
     @{ Label = "Startup event logs (user)";      Path = "$env:LOCALAPPDATA\Diagnostics" }
+    @{ Label = "Brave cache";                    Path = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\Cache" }
+    @{ Label = "Brave GPU cache";                Path = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\Default\GPUCache" }
+    @{ Label = "Opera cache";                    Path = "$env:APPDATA\Opera Software\Opera Stable\Cache" }
+    @{ Label = "Vivaldi cache";                  Path = "$env:LOCALAPPDATA\Vivaldi\User Data\Default\Cache" }
+    @{ Label = "VS Code Insiders logs";          Path = "$env:APPDATA\Code - Insiders\logs" }
+    @{ Label = "VS Code workspace storage";      Path = "$env:APPDATA\Code\User\workspaceStorage" }
+    @{ Label = "Zoom cache";                     Path = "$env:APPDATA\Zoom\data" }
+    @{ Label = "Docker desktop cache";           Path = "$env:LOCALAPPDATA\Docker\wsl\data\tmp" }
+    @{ Label = "Gradle global cache";            Path = "$env:USERPROFILE\.gradle\caches" }
+    @{ Label = "NuGet cache";                    Path = "$env:LOCALAPPDATA\NuGet\v3-cache" }
+    @{ Label = "NuGet HTTP cache";               Path = "$env:LOCALAPPDATA\NuGet\plugins-cache" }
+    @{ Label = "Go module cache";                Path = "$env:LOCALAPPDATA\go-build" }
+    @{ Label = "Composer cache";                 Path = "$env:LOCALAPPDATA\Composer\cache" }
+    @{ Label = "PowerShell help cache";          Path = "$env:LOCALAPPDATA\Microsoft\PowerShell\Help" }
+    @{ Label = "TypeScript server cache";        Path = "$env:LOCALAPPDATA\Microsoft\TypeScript" }
+    @{ Label = "Windows old downloads";          Path = "$env:LOCALAPPDATA\Microsoft\Windows\Explorer\*" }
+    @{ Label = "Temp Internet Files";            Path = "$env:LOCALAPPDATA\Microsoft\Windows\Temporary Internet Files" }
+    @{ Label = "Steam download cache";           Path = "$env:LOCALAPPDATA\Steam\htmlcache" }
+    @{ Label = "Electron apps cache";            Path = "$env:APPDATA\*\Cache\Cache_Data" }
+    @{ Label = "Electron GPU cache";             Path = "$env:APPDATA\*\GPUCache" }
 )
 
 # Admin-level targets
