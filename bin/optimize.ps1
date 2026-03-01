@@ -36,76 +36,15 @@ $completed = 0
 $skipped = 0
 $total = $tasks.Count
 
-# Split tasks into parallelizable (non-admin, short) and sequential (admin/interactive)
-$parallelTasks = @()
-$sequentialTasks = @()
-
 foreach ($task in $tasks) {
     if ($task.AdminOnly -and -not $isAdmin) {
-        # Will be skipped anyway — handle inline
         Show-TaskResult -Label $task.Label -Success $false -Note "Admin required — run as Administrator"
         $skipped++
         continue
     }
-    # Tasks that touch services or UI should stay sequential for safety
-    $seqLabels = @("Refresh Windows Search index", "Clear font cache", "Clear Windows Store cache")
-    if ($seqLabels -contains $task.Label) {
-        $sequentialTasks += $task
-    } else {
-        $parallelTasks += $task
-    }
-}
 
-# Run parallelizable tasks using runspace pool
-if ($parallelTasks.Count -gt 0) {
-    $pool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min(8, $parallelTasks.Count))
-    $pool.Open()
-
-    $jobs = @()
-    foreach ($task in $parallelTasks) {
-        $ps = [powershell]::Create().AddScript({
-            param($action)
-            $sw = [System.Diagnostics.Stopwatch]::StartNew()
-            try {
-                & $action
-                $sw.Stop()
-                return @{ Success = $true; Ms = $sw.ElapsedMilliseconds; Error = $null }
-            } catch {
-                $sw.Stop()
-                return @{ Success = $false; Ms = $sw.ElapsedMilliseconds; Error = $_.Exception.Message }
-            }
-        }).AddArgument($task.Action)
-        $ps.RunspacePool = $pool
-        $jobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Task = $task }
-    }
-
-    foreach ($job in $jobs) {
-        $result = $job.Pipe.EndInvoke($job.Handle)
-        $job.Pipe.Dispose()
-        $t = $job.Task
-        if ($null -eq $result -or $result.Count -eq 0) {
-            Show-TaskResult -Label $t.Label -Success $true -Time "0ms"
-            $completed++
-        } else {
-            $r = $result
-            $elapsed = "{0}ms" -f $r.Ms
-            if ($r.Success) {
-                Show-TaskResult -Label $t.Label -Success $true -Time $elapsed
-                $completed++
-            } else {
-                Show-TaskResult -Label $t.Label -Success $false -Time $elapsed -Note $r.Error
-                $skipped++
-            }
-        }
-    }
-
-    $pool.Close()
-    $pool.Dispose()
-}
-
-# Run sequential tasks (services, store reset, etc.)
-foreach ($task in $sequentialTasks) {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
     try {
         & $task.Action
         $sw.Stop()
