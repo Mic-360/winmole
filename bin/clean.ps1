@@ -166,15 +166,14 @@ Write-Host ""
 $totalFreed = [long]0
 $totalItems = 0
 $isAdmin = Test-IsAdmin
+$config = Get-WimoConfig
 
-# ── Parallel scan of user-level targets ──────────────────────
+# ── Phase 1: Parallel scan user-level targets ──────────────────
 Write-ColorLine "  $($C.Cyan)User-level caches:$($C.Reset)" -Color $C.Cyan
 Write-Host ""
 
-$config = Get-WimoConfig
-
-# Pre-scan sizes in parallel using runspaces for speed
-$pool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min(16, $CleanTargets.Count))
+$poolSize = [Math]::Min([Math]::Max(1, $CleanTargets.Count), [Environment]::ProcessorCount * 2)
+$pool = [runspacefactory]::CreateRunspacePool(1, $poolSize)
 $pool.Open()
 
 $jobs = @()
@@ -200,7 +199,8 @@ foreach ($target in $CleanTargets) {
     $jobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Target = $target }
 }
 
-# Collect results and process
+# Collect scan results
+$userCleanItems = [System.Collections.ArrayList]::new()
 foreach ($job in $jobs) {
     $size = $job.Pipe.EndInvoke($job.Handle)
     if ($null -eq $size) { $size = 0 } else { $size = [long]$size }
@@ -208,8 +208,6 @@ foreach ($job in $jobs) {
     $target = $job.Target
 
     if ($size -eq 0) { continue }
-
-    $sizeText = Format-FileSize $size
     $totalItems++
 
     # Check whitelist
@@ -221,64 +219,168 @@ foreach ($job in $jobs) {
     }
 
     if ($whitelisted) {
-        Show-ScanItem -Status Skip -Label $target.Label -Size $sizeText -Badge "Whitelist"
+        Show-ScanItem -Status Skip -Label $target.Label -Size (Format-FileSize $size) -Badge "Whitelist"
         continue
     }
 
-    if ($DryRun) {
-        Show-ScanItem -Status Success -Label $target.Label -Size $sizeText
-        $totalFreed += $size
-    } else {
-        $freed = Remove-SafeGlob -Pattern $target.Path
-        if ($freed -gt 0) {
-            Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $freed)
-            $totalFreed += $freed
-        } else {
-            $result = Remove-SafePath -Path $target.Path
-            if ($result.Success) {
-                Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $result.BytesFreed)
-                $totalFreed += $result.BytesFreed
-            } else {
-                Show-ScanItem -Status Error -Label $target.Label -Size $sizeText -Badge $result.Reason
-            }
-        }
-    }
+    [void]$userCleanItems.Add(@{ Label = $target.Label; Path = $target.Path; Size = $size })
+    Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $size)
 }
 
 $pool.Close()
 $pool.Dispose()
 
-# Scan admin-level targets
+# Parallel deletion of user-level targets
+if (-not $DryRun -and $userCleanItems.Count -gt 0) {
+    $delPoolSize = [Math]::Min([Math]::Max(1, $userCleanItems.Count), [Environment]::ProcessorCount * 2)
+    $delPool = [runspacefactory]::CreateRunspacePool(1, $delPoolSize)
+    $delPool.Open()
+
+    $delJobs = @()
+    foreach ($item in $userCleanItems) {
+        $ps = [powershell]::Create().AddScript({
+            param($path)
+            [long]$freed = 0
+            try {
+                $targets = Get-Item -Path $path -Force -ErrorAction SilentlyContinue
+                foreach ($t in $targets) {
+                    try {
+                        if ($t.PSIsContainer) {
+                            foreach ($f in [System.IO.Directory]::EnumerateFiles($t.FullName, '*', [System.IO.SearchOption]::AllDirectories)) {
+                                try { $freed += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                            }
+                            [System.IO.Directory]::Delete($t.FullName, $true)
+                        } else {
+                            $freed += $t.Length
+                            [System.IO.File]::Delete($t.FullName)
+                        }
+                    } catch {
+                        try { Remove-Item -Path $t.FullName -Recurse -Force -ErrorAction Stop } catch {}
+                    }
+                }
+            } catch {}
+            return $freed
+        }).AddArgument($item.Path)
+        $ps.RunspacePool = $delPool
+        $delJobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Item = $item }
+    }
+
+    foreach ($dj in $delJobs) {
+        $freed = $dj.Pipe.EndInvoke($dj.Handle)
+        if ($null -eq $freed) { $freed = 0 } else { $freed = [long]$freed }
+        $dj.Pipe.Dispose()
+        $totalFreed += $freed
+    }
+
+    $delPool.Close()
+    $delPool.Dispose()
+} elseif ($DryRun) {
+    foreach ($item in $userCleanItems) { $totalFreed += $item.Size }
+}
+
+# ── Phase 2: Parallel scan admin-level targets ──────────────────
 Write-Host ""
 Write-ColorLine "  $($C.Cyan)System-level caches:$($C.Reset)" -Color $C.Cyan
 Write-Host ""
 
-foreach ($target in $CleanTargetsAdmin) {
-    $size = Get-PathSize $target.Path
+if ($isAdmin) {
+    $adminPoolSize = [Math]::Min([Math]::Max(1, $CleanTargetsAdmin.Count), [Environment]::ProcessorCount * 2)
+    $adminPool = [runspacefactory]::CreateRunspacePool(1, $adminPoolSize)
+    $adminPool.Open()
 
-    if ($size -eq 0) {
-        continue
+    $adminJobs = @()
+    foreach ($target in $CleanTargetsAdmin) {
+        $ps = [powershell]::Create().AddScript({
+            param($p)
+            [long]$total = 0
+            $items = Get-Item -Path $p -Force -ErrorAction SilentlyContinue
+            foreach ($item in $items) {
+                if ($item.PSIsContainer) {
+                    try {
+                        foreach ($f in [System.IO.Directory]::EnumerateFiles($item.FullName, '*', [System.IO.SearchOption]::AllDirectories)) {
+                            try { $total += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                        }
+                    } catch {}
+                } else {
+                    $total += $item.Length
+                }
+            }
+            return $total
+        }).AddArgument($target.Path)
+        $ps.RunspacePool = $adminPool
+        $adminJobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Target = $target }
     }
 
-    $sizeText = Format-FileSize $size
-    $totalItems++
+    $adminCleanItems = [System.Collections.ArrayList]::new()
+    foreach ($job in $adminJobs) {
+        $size = $job.Pipe.EndInvoke($job.Handle)
+        if ($null -eq $size) { $size = 0 } else { $size = [long]$size }
+        $job.Pipe.Dispose()
+        $target = $job.Target
 
-    if (-not $isAdmin) {
-        Show-ScanItem -Status Warn -Label $target.Label -Size $sizeText -Badge "Admin required"
-        continue
+        if ($size -eq 0) { continue }
+        $totalItems++
+
+        [void]$adminCleanItems.Add(@{ Label = $target.Label; Path = $target.Path; Size = $size })
+        Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $size)
     }
 
-    if ($DryRun) {
-        Show-ScanItem -Status Success -Label $target.Label -Size $sizeText
-        $totalFreed += $size
-    } else {
-        $result = Remove-SafePath -Path $target.Path
-        if ($result.Success) {
-            Show-ScanItem -Status Success -Label $target.Label -Size (Format-FileSize $result.BytesFreed)
-            $totalFreed += $result.BytesFreed
-        } else {
-            Show-ScanItem -Status Error -Label $target.Label -Size $sizeText -Badge $result.Reason
+    $adminPool.Close()
+    $adminPool.Dispose()
+
+    # Parallel deletion of admin-level targets
+    if (-not $DryRun -and $adminCleanItems.Count -gt 0) {
+        $admDelPoolSize = [Math]::Min([Math]::Max(1, $adminCleanItems.Count), [Environment]::ProcessorCount * 2)
+        $admDelPool = [runspacefactory]::CreateRunspacePool(1, $admDelPoolSize)
+        $admDelPool.Open()
+
+        $admDelJobs = @()
+        foreach ($item in $adminCleanItems) {
+            $ps = [powershell]::Create().AddScript({
+                param($path)
+                [long]$freed = 0
+                try {
+                    $targets = Get-Item -Path $path -Force -ErrorAction SilentlyContinue
+                    foreach ($t in $targets) {
+                        try {
+                            if ($t.PSIsContainer) {
+                                foreach ($f in [System.IO.Directory]::EnumerateFiles($t.FullName, '*', [System.IO.SearchOption]::AllDirectories)) {
+                                    try { $freed += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                                }
+                                [System.IO.Directory]::Delete($t.FullName, $true)
+                            } else {
+                                $freed += $t.Length
+                                [System.IO.File]::Delete($t.FullName)
+                            }
+                        } catch {
+                            try { Remove-Item -Path $t.FullName -Recurse -Force -ErrorAction Stop } catch {}
+                        }
+                    }
+                } catch {}
+                return $freed
+            }).AddArgument($item.Path)
+            $ps.RunspacePool = $admDelPool
+            $admDelJobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Item = $item }
         }
+
+        foreach ($dj in $admDelJobs) {
+            $freed = $dj.Pipe.EndInvoke($dj.Handle)
+            if ($null -eq $freed) { $freed = 0 } else { $freed = [long]$freed }
+            $dj.Pipe.Dispose()
+            $totalFreed += $freed
+        }
+
+        $admDelPool.Close()
+        $admDelPool.Dispose()
+    } elseif ($DryRun) {
+        foreach ($item in $adminCleanItems) { $totalFreed += $item.Size }
+    }
+} else {
+    foreach ($target in $CleanTargetsAdmin) {
+        $size = Get-PathSize $target.Path
+        if ($size -eq 0) { continue }
+        $totalItems++
+        Show-ScanItem -Status Warn -Label $target.Label -Size (Format-FileSize $size) -Badge "Admin required"
     }
 }
 
