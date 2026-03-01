@@ -19,49 +19,64 @@ const (
 	version   = "1.0.0"
 	maxItems  = 50
 	barWidth  = 20
-	brandName = "🐹 WiMo Analyze"
+	brandName = "◉ WiMo Analyze"
 )
 
-// Styles
+// Modern palette + styles
 var (
+	clrBrand   = lipgloss.Color("#9CB98B")
+	clrAccent  = lipgloss.Color("#B5CDA3")
+	clrGreen   = lipgloss.Color("#A6E3A1")
+	clrYellow  = lipgloss.Color("#F9E2AF")
+	clrOrange  = lipgloss.Color("#DBC5A0")
+	clrText    = lipgloss.Color("#D5DDD0")
+	clrSubtext = lipgloss.Color("#A3AE9E")
+	clrOverlay = lipgloss.Color("#6B7466")
+	clrSurface = lipgloss.Color("#3A4035")
+
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("208"))
+			Foreground(clrBrand)
 
 	selectedStyle = lipgloss.NewStyle().
 			Bold(true).
-			Background(lipgloss.Color("235")).
-			Foreground(lipgloss.Color("255"))
+			Foreground(clrText).
+			Background(lipgloss.Color("236"))
 
 	normalStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("250"))
+			Foreground(clrText)
 
 	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+			Foreground(clrOverlay)
 
 	sizeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82")).
+			Foreground(clrGreen).
 			Bold(true)
 
 	largeSizeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("208")).
+			Foreground(clrOrange).
 			Bold(true)
 
 	barFilledStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("82"))
+			Foreground(clrGreen)
 
 	barEmptyStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240"))
+			Foreground(clrOverlay)
 
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("51"))
+			Foreground(clrAccent)
 
 	borderStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+			Foreground(clrSurface)
 
 	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("245"))
+			Foreground(clrSubtext)
+
+	frameStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(clrSurface).
+			Padding(0, 1)
 )
 
 type entry struct {
@@ -242,11 +257,11 @@ func renderBar(percent float64) string {
 	var fillStyle lipgloss.Style
 	switch {
 	case percent >= 50:
-		fillStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // orange
+		fillStyle = lipgloss.NewStyle().Foreground(clrOrange)
 	case percent >= 25:
-		fillStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("226")) // yellow
+		fillStyle = lipgloss.NewStyle().Foreground(clrYellow)
 	default:
-		fillStyle = barFilledStyle // green
+		fillStyle = barFilledStyle
 	}
 
 	bar := fillStyle.Render(strings.Repeat("█", filled)) +
@@ -372,16 +387,13 @@ func fileIcon(e entry) string {
 }
 
 func (m model) View() string {
-	var b strings.Builder
 	w := m.width
 	if w < 40 {
 		w = 80
 	}
-	innerW := w - 4 // account for "│  " and " │"
+	cardW := w
 
-	// Header
-	top := borderStyle.Render("╭" + strings.Repeat("─", w-2) + "╮")
-	b.WriteString(top + "\n")
+	var lines []string
 
 	// Breadcrumb path
 	breadcrumb := m.currentDir
@@ -393,35 +405,26 @@ func (m model) View() string {
 		}
 	}
 
-	headerContent := "  " + titleStyle.Render(brandName) + "  " +
-		dimStyle.Render("·") + "  " + dimStyle.Render(breadcrumb)
-	headerLine := padRight(headerContent, w-2)
-	b.WriteString(borderStyle.Render("│") + headerLine + borderStyle.Render("│") + "\n")
+	lines = append(lines,
+		titleStyle.Render(brandName)+"  "+dimStyle.Render("·")+"  "+dimStyle.Render(breadcrumb),
+	)
 
 	// Stats line
 	statsContent := fmt.Sprintf("  %s  ·  %s  ·  Depth: %d",
 		sizeStyle.Render(formatSize(m.totalSize)),
 		dimStyle.Render(fmt.Sprintf("%d items", m.itemCount)),
 		len(m.history))
-	statsLine := padRight(statsContent, w-2)
-	b.WriteString(borderStyle.Render("│") + statsLine + borderStyle.Render("│") + "\n")
-
-	sep := borderStyle.Render("├" + strings.Repeat("─", w-2) + "┤")
-	b.WriteString(sep + "\n")
+	lines = append(lines, statsContent)
+	lines = append(lines, borderStyle.Render(strings.Repeat("─", max(8, cardW-6))))
 
 	if m.scanning {
-		scanLine := padRight("  Scanning...", w-2)
-		b.WriteString(borderStyle.Render("│") + scanLine + borderStyle.Render("│") + "\n")
+		lines = append(lines, dimStyle.Render("Scanning directory tree..."))
 	} else if m.err != nil {
-		errLine := padRight("  Error: "+m.err.Error(), w-2)
-		b.WriteString(borderStyle.Render("│") + errLine + borderStyle.Render("│") + "\n")
+		lines = append(lines, lipgloss.NewStyle().Foreground(clrOrange).Render("Error: "+m.err.Error()))
 	} else {
-		// Column headers
-		colHdr := fmt.Sprintf("   %3s  %-*s  %-*s  %5s  %-4s  %s",
-			"#", barWidth, "Usage", 6, "%", "Type", "", "Size")
-		colHdrLine := padRight(headerStyle.Render(colHdr), w-2)
-		b.WriteString(borderStyle.Render("│") + colHdrLine + borderStyle.Render("│") + "\n")
-		b.WriteString(sep + "\n")
+		colHdr := fmt.Sprintf(" %3s  %-*s  %-*s  %-4s  %s", "#", barWidth, "Usage", 6, "%", "Type", "Name / Size")
+		lines = append(lines, headerStyle.Render(colHdr))
+		lines = append(lines, borderStyle.Render(strings.Repeat("─", max(8, cardW-6))))
 
 		// Calculate visible items
 		visibleHeight := m.height - 8
@@ -438,9 +441,9 @@ func (m model) View() string {
 			e := m.entries[i]
 
 			// Cursor indicator
-			cursor := "   "
+			cursor := "  "
 			if i == m.cursor {
-				cursor = " ▶ "
+				cursor = "▶ "
 			}
 
 			// Number
@@ -456,7 +459,7 @@ func (m model) View() string {
 			icon := fileIcon(e)
 
 			// Name — scale to terminal width
-			maxNameLen := innerW - 55 // space for cursor+num+bar+pct+icon+size
+			maxNameLen := max(10, cardW-56)
 			if maxNameLen < 10 {
 				maxNameLen = 10
 			}
@@ -472,29 +475,25 @@ func (m model) View() string {
 				sizeRendered = largeSizeStyle.Render(sizeStr)
 			}
 
-			line := fmt.Sprintf("%s %s  %s  %s  %s %-*s  %s",
+			line := fmt.Sprintf("%s%s  %s  %s  %s %-*s  %s",
 				cursor, num, bar, pct, icon, maxNameLen, name, sizeRendered)
 
 			if i == m.cursor {
-				b.WriteString(selectedStyle.Render(padRight(line, w-2)))
+				lines = append(lines, selectedStyle.Render(line))
 			} else {
-				b.WriteString(normalStyle.Render(padRight(line, w-2)))
+				lines = append(lines, normalStyle.Render(line))
 			}
-			b.WriteString("\n")
 		}
 	}
 
-	// Footer
-	b.WriteString(sep + "\n")
+	lines = append(lines, borderStyle.Render(strings.Repeat("─", max(8, cardW-6))))
 	help1 := "  ↑↓/jk navigate  · Enter drill-in · Backspace up · O open"
 	shown := min(max(5, m.height-8), len(m.entries))
 	help2 := "  F reveal in Explorer · Q quit  · " + dimStyle.Render(fmt.Sprintf("%d/%d shown", shown, len(m.entries)))
-	b.WriteString(borderStyle.Render("│") + padRight(helpStyle.Render(help1), w-2) + borderStyle.Render("│") + "\n")
-	b.WriteString(borderStyle.Render("│") + padRight(helpStyle.Render(help2), w-2) + borderStyle.Render("│") + "\n")
-	bottom := borderStyle.Render("╰" + strings.Repeat("─", w-2) + "╯")
-	b.WriteString(bottom + "\n")
+	lines = append(lines, helpStyle.Render(help1))
+	lines = append(lines, helpStyle.Render(help2))
 
-	return b.String()
+	return frameStyle.Width(cardW).Render(strings.Join(lines, "\n")) + "\n"
 }
 
 func truncatePath(path string, maxLen int) string {
