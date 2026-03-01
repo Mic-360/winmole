@@ -81,7 +81,10 @@ $categories = [ordered]@{
 # Main execution
 Show-Banner -Compact
 
-Write-ColorLine "  $($C.Bold)⚡ WiMo Optimize  ·  System optimization$($C.Reset)" -Color $C.White
+Write-WimoCard -Title "WiMo Optimize" -AccentColor $C.SageLight -Lines @(
+    "  Applying safe system tuning tasks across network, storage, system, and performance.",
+    "  Live task results with timing and admin hints appear below."
+) -ShowBottomBorder
 Write-Host ""
 
 $completed = 0
@@ -106,8 +109,9 @@ foreach ($cat in $categories.Keys) {
         "Performance" { "▶" }
     }
     Write-Host ""
-    Write-Host "  $($C.Bold)$($C.Cyan)$catIcon  $cat$($C.Reset)  $($C.Grey)($($tasks.Count) tasks)$($C.Reset)"
-    Write-Host "  $($C.Grey)$('─' * 55)$($C.Reset)"
+    Write-WimoCard -Title "$catIcon  $cat" -AccentColor $C.Cyan -Lines @(
+        "  $($tasks.Count) tasks queued"
+    ) -ShowBottomBorder
 
     foreach ($task in $tasks) {
         $taskNum++
@@ -137,7 +141,7 @@ foreach ($cat in $categories.Keys) {
 
 # Summary
 Write-Host ""
-Write-Host "  $($C.Grey)$('═' * 55)$($C.Reset)"
+Write-Host "  $($C.Grey)$('─' * 55)$($C.Reset)"
 Write-Host ""
 
 $statusParts = @("$($C.Green)$completed done$($C.Reset)")

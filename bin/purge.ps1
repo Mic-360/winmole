@@ -268,7 +268,10 @@ function Find-Artifacts {
 # Main execution
 Show-Banner -Compact
 
-Write-ColorLine "  $($C.Bold)🔥 WiMo Purge  ·  Scanning project directories...$($C.Reset)" -Color $C.White
+Write-WimoCard -Title "WiMo Purge" -AccentColor $C.SageLight -Lines @(
+    "  Scanning project roots for build artifacts and cache directories.",
+    "  Select targets interactively before removal."
+) -ShowBottomBorder
 Write-Host ""
 
 # Determine scan paths
@@ -287,9 +290,9 @@ $activePaths = @()
 foreach ($sp in $scanPaths) {
     if (Test-Path $sp) {
         $activePaths += $sp
-        Write-ColorLine "  Scan path: $($C.Cyan)$sp$($C.Reset)" -Color $C.White
+        Write-ColorLine "  ✓ Scan path: $($C.Cyan)$sp$($C.Reset)" -Color $C.White
     } else {
-        Write-ColorLine "  Scan path: $($C.Grey)$sp (not found — skipping)$($C.Reset)" -Color $C.Grey
+        Write-ColorLine "  ○ Scan path: $($C.Grey)$sp (not found — skipping)$($C.Reset)" -Color $C.Grey
     }
 }
 
@@ -321,6 +324,11 @@ $totalSize = ($allArtifacts | Measure-Object -Property Size -Sum).Sum
 $projectCount = ($allArtifacts | ForEach-Object { Split-Path (Split-Path $_.Path -Parent) -Leaf } | Sort-Object -Unique).Count
 
 Write-ColorLine "  Found $($allArtifacts.Count) artifact directories across $projectCount projects" -Color $C.White
+Write-WimoCard -Title "Purge Candidates" -AccentColor $C.Cyan -Lines @(
+    "  Candidates: $($allArtifacts.Count)",
+    "  Projects: $projectCount",
+    "  Estimated reclaimable size: $(Format-FileSize $totalSize)"
+) -ShowBottomBorder
 Write-Host ""
 
 # Show checkbox
