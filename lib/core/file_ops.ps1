@@ -4,7 +4,7 @@
 function Get-FolderSize {
     <#
     .SYNOPSIS
-        Calculates the total size of a folder in bytes.
+        Calculates the total size of a folder in bytes using fast .NET enumeration.
     #>
     param([string]$Path)
 
@@ -18,10 +18,11 @@ function Get-FolderSize {
     }
 
     try {
-        $size = (Get-ChildItem -Path $Path -Recurse -Force -File -ErrorAction SilentlyContinue |
-                 Measure-Object -Property Length -Sum -ErrorAction SilentlyContinue).Sum
-        if ($null -eq $size) { return 0 }
-        return [long]$size
+        [long]$size = 0
+        foreach ($f in [System.IO.Directory]::EnumerateFiles($Path, '*', [System.IO.SearchOption]::AllDirectories)) {
+            try { $size += ([System.IO.FileInfo]::new($f)).Length } catch {}
+        }
+        return $size
     } catch {
         return 0
     }
@@ -104,6 +105,7 @@ function Remove-SafePath {
     <#
     .SYNOPSIS
         Safely removes a path after passing 4-layer validation.
+        Uses .NET methods for fast deletion of large directory trees.
     #>
     param(
         [string]$Path,
@@ -125,16 +127,24 @@ function Remove-SafePath {
         Write-WimoLog "Removing: $Path" -Level Debug
 
         if (Test-Path $Path -PathType Container) {
-            Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop
+            # .NET recursive delete is significantly faster than Remove-Item -Recurse
+            [System.IO.Directory]::Delete($Path, $true)
         } else {
-            Remove-Item -Path $Path -Force -ErrorAction Stop
+            [System.IO.File]::Delete($Path)
         }
 
         Write-WimoLog "Removed: $Path ($(Format-FileSize $size))" -Level Info
         return @{ Success = $true; BytesFreed = $size; Reason = "Removed" }
     } catch {
-        Write-WimoLog "Failed to remove '$Path': $_" -Level Error
-        return @{ Success = $false; BytesFreed = 0; Reason = $_.Exception.Message }
+        # Fallback to Remove-Item for permission/long-path edge cases
+        try {
+            Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop
+            Write-WimoLog "Removed (fallback): $Path ($(Format-FileSize $size))" -Level Info
+            return @{ Success = $true; BytesFreed = $size; Reason = "Removed" }
+        } catch {
+            Write-WimoLog "Failed to remove '$Path': $_" -Level Error
+            return @{ Success = $false; BytesFreed = 0; Reason = $_.Exception.Message }
+        }
     }
 }
 
@@ -164,12 +174,12 @@ function Remove-SafeGlob {
 function Get-PathSize {
     <#
     .SYNOPSIS
-        Gets the size of a path (supports glob patterns).
+        Gets the size of a path (supports glob patterns). Uses .NET for speed.
     #>
     param([string]$Path)
 
-    $total = 0
-    $items = Get-Item -Path $Path -ErrorAction SilentlyContinue
+    [long]$total = 0
+    $items = Get-Item -Path $Path -Force -ErrorAction SilentlyContinue
 
     foreach ($item in $items) {
         if ($item.PSIsContainer) {
