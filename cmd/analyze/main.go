@@ -18,7 +18,7 @@ import (
 const (
 	version   = "1.0.0"
 	maxItems  = 50
-	barWidth  = 24
+	barWidth  = 20
 	brandName = "🐹 WiMo Analyze"
 )
 
@@ -70,6 +70,7 @@ type entry struct {
 	size    int64
 	isDir   bool
 	percent float64
+	ext     string
 }
 
 type model struct {
@@ -82,6 +83,7 @@ type model struct {
 	height     int
 	scanning   bool
 	err        error
+	itemCount  int
 }
 
 type scanDoneMsg struct {
@@ -148,12 +150,14 @@ func scanDirectory(dir string) ([]entry, int64, error) {
 			}
 
 			if size > 0 {
+				ext := strings.ToLower(filepath.Ext(d.Name()))
 				mu.Lock()
 				results = append(results, entry{
 					name:  d.Name(),
 					path:  fullPath,
 					size:  size,
 					isDir: d.IsDir(),
+					ext:   ext,
 				})
 				mu.Unlock()
 			}
@@ -235,7 +239,17 @@ func renderBar(percent float64) string {
 	}
 	empty := barWidth - filled
 
-	bar := barFilledStyle.Render(strings.Repeat("█", filled)) +
+	var fillStyle lipgloss.Style
+	switch {
+	case percent >= 50:
+		fillStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("208")) // orange
+	case percent >= 25:
+		fillStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("226")) // yellow
+	default:
+		fillStyle = barFilledStyle // green
+	}
+
+	bar := fillStyle.Render(strings.Repeat("█", filled)) +
 		barEmptyStyle.Render(strings.Repeat("░", empty))
 
 	return bar
@@ -257,6 +271,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.err = msg.err
 		m.entries = msg.entries
 		m.totalSize = msg.totalSize
+		m.itemCount = len(msg.entries)
 		m.cursor = 0
 		return m, nil
 
@@ -330,6 +345,32 @@ func padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-visible)
 }
 
+func fileIcon(e entry) string {
+	if e.isDir {
+		return "📁"
+	}
+	switch e.ext {
+	case ".go", ".py", ".js", ".ts", ".rs", ".c", ".cpp", ".java", ".rb", ".cs":
+		return "📜"
+	case ".zip", ".tar", ".gz", ".rar", ".7z":
+		return "📦"
+	case ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg", ".webp":
+		return "🖼 "
+	case ".mp4", ".avi", ".mkv", ".mov", ".wmv":
+		return "🎬"
+	case ".mp3", ".wav", ".flac", ".ogg", ".aac":
+		return "🎵"
+	case ".exe", ".msi", ".dll":
+		return "⚙ "
+	case ".pdf", ".doc", ".docx", ".txt", ".md":
+		return "📝"
+	case ".log":
+		return "📋"
+	default:
+		return "📄"
+	}
+}
+
 func (m model) View() string {
 	var b strings.Builder
 	w := m.width
@@ -342,11 +383,28 @@ func (m model) View() string {
 	top := borderStyle.Render("╭" + strings.Repeat("─", w-2) + "╮")
 	b.WriteString(top + "\n")
 
+	// Breadcrumb path
+	breadcrumb := m.currentDir
+	if len(breadcrumb) > 50 {
+		parts := strings.Split(breadcrumb, string(os.PathSeparator))
+		if len(parts) > 3 {
+			breadcrumb = parts[0] + string(os.PathSeparator) + "..." + string(os.PathSeparator) +
+				strings.Join(parts[len(parts)-2:], string(os.PathSeparator))
+		}
+	}
+
 	headerContent := "  " + titleStyle.Render(brandName) + "  " +
-		dimStyle.Render("·") + "  " + dimStyle.Render(truncatePath(m.currentDir, 30)) +
-		"  " + dimStyle.Render("·") + "  Total: " + sizeStyle.Render(formatSize(m.totalSize))
+		dimStyle.Render("·") + "  " + dimStyle.Render(breadcrumb)
 	headerLine := padRight(headerContent, w-2)
 	b.WriteString(borderStyle.Render("│") + headerLine + borderStyle.Render("│") + "\n")
+
+	// Stats line
+	statsContent := fmt.Sprintf("  %s  ·  %s  ·  Depth: %d",
+		sizeStyle.Render(formatSize(m.totalSize)),
+		dimStyle.Render(fmt.Sprintf("%d items", m.itemCount)),
+		len(m.history))
+	statsLine := padRight(statsContent, w-2)
+	b.WriteString(borderStyle.Render("│") + statsLine + borderStyle.Render("│") + "\n")
 
 	sep := borderStyle.Render("├" + strings.Repeat("─", w-2) + "┤")
 	b.WriteString(sep + "\n")
@@ -358,6 +416,13 @@ func (m model) View() string {
 		errLine := padRight("  Error: "+m.err.Error(), w-2)
 		b.WriteString(borderStyle.Render("│") + errLine + borderStyle.Render("│") + "\n")
 	} else {
+		// Column headers
+		colHdr := fmt.Sprintf("   %3s  %-*s  %-*s  %5s  %-4s  %s",
+			"#", barWidth, "Usage", 6, "%", "Type", "", "Size")
+		colHdrLine := padRight(headerStyle.Render(colHdr), w-2)
+		b.WriteString(borderStyle.Render("│") + colHdrLine + borderStyle.Render("│") + "\n")
+		b.WriteString(sep + "\n")
+
 		// Calculate visible items
 		visibleHeight := m.height - 8
 		if visibleHeight < 5 {
@@ -387,11 +452,8 @@ func (m model) View() string {
 			// Percent
 			pct := fmt.Sprintf("%5.1f%%", e.percent)
 
-			// Icon
-			icon := "📄"
-			if e.isDir {
-				icon = "📁"
-			}
+			// Icon — file type aware
+			icon := fileIcon(e)
 
 			// Name — scale to terminal width
 			maxNameLen := innerW - 55 // space for cursor+num+bar+pct+icon+size
@@ -425,7 +487,8 @@ func (m model) View() string {
 	// Footer
 	b.WriteString(sep + "\n")
 	help1 := "  ↑↓/jk navigate  · Enter drill-in · Backspace up · O open"
-	help2 := "  F reveal in Explorer · Q quit"
+	shown := min(max(5, m.height-8), len(m.entries))
+	help2 := "  F reveal in Explorer · Q quit  · " + dimStyle.Render(fmt.Sprintf("%d/%d shown", shown, len(m.entries)))
 	b.WriteString(borderStyle.Render("│") + padRight(helpStyle.Render(help1), w-2) + borderStyle.Render("│") + "\n")
 	b.WriteString(borderStyle.Render("│") + padRight(helpStyle.Render(help2), w-2) + borderStyle.Render("│") + "\n")
 	bottom := borderStyle.Render("╰" + strings.Repeat("─", w-2) + "╯")
