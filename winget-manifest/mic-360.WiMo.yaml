@@ -1,0 +1,22 @@
+PackageIdentifier: mic-360.WiMo
+PackageVersion: 1.0.0
+PackageLocale: en-US
+Publisher: mic-360
+PackageName: WiMo
+ShortDescription: Windows system optimizer and cleaner — Mole for Windows
+Description: |-
+  WiMo is a Windows port of Mole, an all-in-one system maintenance CLI toolkit.
+  Equivalent to CleanMyMac + AppCleaner + DaisyDisk + iStat Menus, for Windows.
+  Features: deep cleanup, smart uninstall (registry + winget), disk analyzer,
+  live system dashboard, project artifact purge, and system optimization.
+License: MIT
+Tags:
+  - cleanup
+  - optimizer
+  - system
+  - cli
+  - windows
+  - uninstaller
+  - disk-analyzer
+ManifestType: singleton
+ManifestVersion: 1.6.0
