@@ -266,18 +266,149 @@ Show-Banner -Compact
 Write-ColorLine "  $($C.Bold)🗑️  WiMo Uninstall  ·  Discovering installed apps...$($C.Reset)" -Color $C.White
 Write-Host ""
 
-Write-Host "  $($C.Cyan)Scanning registry...$($C.Reset)" -NoNewline
-$registryApps = Get-RegistryApps
-Write-Host " $($C.Green)$($registryApps.Count) found$($C.Reset)"
+# ── Parallel scanning of all sources ─────────────────────
+$scanPool = [runspacefactory]::CreateRunspacePool(1, 3)
+$scanPool.Open()
 
-Write-Host "  $($C.Cyan)Scanning winget...$($C.Reset)" -NoNewline
-$wingetApps = Get-WingetApps
-Write-Host " $($C.Green)$($wingetApps.Count) found$($C.Reset)"
+# Registry scan (runs in parallel)
+$regPs = [powershell]::Create().AddScript({
+    $registryPaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    $apps = @()
+    foreach ($regPath in $registryPaths) {
+        $items = Get-ItemProperty $regPath -ErrorAction SilentlyContinue |
+            Where-Object { $_.DisplayName -and $_.UninstallString }
+        foreach ($item in $items) {
+            $sizeKB = if ($item.EstimatedSize) { [long]$item.EstimatedSize * 1024 } else { 0 }
+            $installDate = if ($item.InstallDate) {
+                try { [datetime]::ParseExact($item.InstallDate, 'yyyyMMdd', $null).ToString('yyyy-MM-dd') } catch { "" }
+            } else { "" }
+            $sizeText = if ($sizeKB -gt 0) {
+                switch ($sizeKB) {
+                    { $_ -ge 1TB } { '{0:N1} TB' -f ($_ / 1TB) }
+                    { $_ -ge 1GB } { '{0:N1} GB' -f ($_ / 1GB) }
+                    { $_ -ge 1MB } { '{0:N1} MB' -f ($_ / 1MB) }
+                    { $_ -ge 1KB } { '{0:N1} KB' -f ($_ / 1KB) }
+                    default        { "$_ B" }
+                }
+            } else { "Unknown" }
+            $apps += @{
+                Name               = $item.DisplayName
+                Version            = if ($item.DisplayVersion) { $item.DisplayVersion } else { "" }
+                Publisher          = if ($item.Publisher) { $item.Publisher } else { "" }
+                InstallDate        = $installDate
+                Size               = $sizeKB
+                SizeText           = $sizeText
+                UninstallString    = $item.UninstallString
+                QuietUninstallString = if ($item.QuietUninstallString) { $item.QuietUninstallString } else { "" }
+                Source             = "registry"
+                WingetId           = ""
+            }
+        }
+    }
+    return ,$apps
+})
+$regPs.RunspacePool = $scanPool
+$regHandle = $regPs.BeginInvoke()
 
-Write-Host "  $($C.Cyan)Scanning local programs...$($C.Reset)" -NoNewline
-$localApps = Get-LocalApps
-Write-Host " $($C.Green)$($localApps.Count) found$($C.Reset)"
+# Winget scan (runs in parallel)
+$wingetPs = [powershell]::Create().AddScript({
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { return ,@() }
+    $apps = @()
+    try {
+        $raw = winget list --accept-source-agreements 2>$null
+        if (-not $raw) { return ,@() }
+        $lines = $raw -split "`n"
+        $headerIdx = -1
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^Name\s+') { $headerIdx = $i; break }
+        }
+        if ($headerIdx -lt 0) { return ,@() }
+        $sepLine = $lines[$headerIdx + 1]
+        if (-not ($sepLine -match '^-')) { return ,@() }
+        $dataLines = $lines[($headerIdx + 2)..($lines.Count - 1)]
+        foreach ($line in $dataLines) {
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+            if ($line -match '^\d+ upgrades available') { continue }
+            $cols = $line -split '\s{2,}'
+            if ($cols.Count -ge 2) {
+                $apps += @{
+                    Name    = $cols[0].Trim()
+                    Id      = if ($cols.Count -ge 2) { $cols[1].Trim() } else { "" }
+                    Version = if ($cols.Count -ge 3) { $cols[2].Trim() } else { "" }
+                    Source  = "winget"
+                }
+            }
+        }
+    } catch {}
+    return ,$apps
+})
+$wingetPs.RunspacePool = $scanPool
+$wingetHandle = $wingetPs.BeginInvoke()
 
+# Local programs scan (runs in parallel)
+$localPs = [powershell]::Create().AddScript({
+    $apps = @()
+    $localPrograms = "$env:LOCALAPPDATA\Programs"
+    if (Test-Path $localPrograms) {
+        Get-ChildItem $localPrograms -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            [long]$size = 0
+            try {
+                foreach ($f in [System.IO.Directory]::EnumerateFiles($_.FullName, '*', [System.IO.SearchOption]::AllDirectories)) {
+                    try { $size += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                }
+            } catch {}
+            $sizeText = switch ($size) {
+                { $_ -ge 1TB } { '{0:N1} TB' -f ($_ / 1TB) }
+                { $_ -ge 1GB } { '{0:N1} GB' -f ($_ / 1GB) }
+                { $_ -ge 1MB } { '{0:N1} MB' -f ($_ / 1MB) }
+                { $_ -ge 1KB } { '{0:N1} KB' -f ($_ / 1KB) }
+                default        { "$_ B" }
+            }
+            $apps += @{
+                Name     = $_.Name
+                Path     = $_.FullName
+                Size     = $size
+                SizeText = $sizeText
+                Source   = "local"
+            }
+        }
+    }
+    return ,$apps
+})
+$localPs.RunspacePool = $scanPool
+$localHandle = $localPs.BeginInvoke()
+
+# Show progress while waiting
+Write-Host "  $($C.Cyan)Scanning sources in parallel...$($C.Reset)"
+$sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+# Collect registry results
+$registryApps = @($regPs.EndInvoke($regHandle))
+if ($registryApps.Count -eq 1 -and $registryApps[0] -is [System.Object[]]) { $registryApps = $registryApps[0] }
+$regPs.Dispose()
+Write-Host "  $($C.Green)✓$($C.Reset)  Registry: $($registryApps.Count) apps"
+
+# Collect winget results
+$wingetApps = @($wingetPs.EndInvoke($wingetHandle))
+if ($wingetApps.Count -eq 1 -and $wingetApps[0] -is [System.Object[]]) { $wingetApps = $wingetApps[0] }
+$wingetPs.Dispose()
+Write-Host "  $($C.Green)✓$($C.Reset)  Winget: $($wingetApps.Count) apps"
+
+# Collect local results
+$localApps = @($localPs.EndInvoke($localHandle))
+if ($localApps.Count -eq 1 -and $localApps[0] -is [System.Object[]]) { $localApps = $localApps[0] }
+$localPs.Dispose()
+Write-Host "  $($C.Green)✓$($C.Reset)  Local: $($localApps.Count) apps"
+
+$sw.Stop()
+$scanPool.Close()
+$scanPool.Dispose()
+
+Write-Host "  $($C.Grey)Scan completed in $($sw.ElapsedMilliseconds)ms$($C.Reset)"
 Write-Host ""
 
 $allApps = Merge-AppLists -RegistryApps $registryApps -WingetApps $wingetApps -LocalApps $localApps
@@ -287,7 +418,25 @@ if ($allApps.Count -eq 0) {
     return
 }
 
-# Prepare items for checkbox
+# Search/filter prompt
+Write-Host "  $($C.Bold)Found $($allApps.Count) installed applications$($C.Reset)"
+Write-Host "  $($C.Grey)Type a search term to filter, or press Enter to show all:$($C.Reset) " -NoNewline
+$searchTerm = Read-Host
+
+if ($searchTerm) {
+    $allApps = @($allApps | Where-Object {
+        $_.Name -like "*$searchTerm*" -or $_.Publisher -like "*$searchTerm*"
+    })
+    if ($allApps.Count -eq 0) {
+        Write-ColorLine "  No apps matching '$searchTerm'." -Color $C.Grey
+        return
+    }
+    Write-ColorLine "  Showing $($allApps.Count) matching apps" -Color $C.Cyan
+}
+
+Write-Host ""
+
+# Prepare items for checkbox — use plain text source badges for correct alignment
 $checkboxItems = @()
 foreach ($app in $allApps) {
     $age = ""
@@ -300,9 +449,9 @@ foreach ($app in $allApps) {
     }
 
     $sourceBadge = switch ($app.Source) {
-        'winget'   { "$($C.Cyan)winget$($C.Reset)" }
-        'registry' { "$($C.Grey)registry$($C.Reset)" }
-        'local'    { "$($C.Grey)local$($C.Reset)" }
+        'winget'   { "winget" }
+        'registry' { "registry" }
+        'local'    { "local" }
     }
 
     $checkboxItems += @{
@@ -316,9 +465,6 @@ foreach ($app in $allApps) {
         AppData    = $app
     }
 }
-
-Write-ColorLine "  Found $($allApps.Count) installed applications" -Color $C.White
-Write-Host ""
 
 $columns = @(
     @{ Header = "App Name"; Width = 30; Key = "Label" }
