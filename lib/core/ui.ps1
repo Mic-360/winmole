@@ -55,6 +55,98 @@ function Get-DisplayWidth {
     return $w
 }
 
+function Read-WimoKey {
+    <#
+    .SYNOPSIS
+        Reads a key from RawUI; falls back to text command input when raw key capture is unavailable.
+    #>
+    param(
+        [string]$FallbackPrompt = "  Input (j/k/up/down/space/enter/a/n/q):"
+    )
+
+    $savedErrorPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Stop'
+
+    try {
+        return $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+    } catch {
+        Write-WimoLog "Raw key input unavailable; using fallback input mode. $_" -Level Warn
+
+        [Console]::CursorVisible = $true
+        Write-ColorLine "  Raw key input not supported in this terminal. Command mode enabled." -Color $C.Orange
+        $raw = Read-Host $FallbackPrompt
+        [Console]::CursorVisible = $false
+
+        if ($null -eq $raw) { $raw = "" }
+        $cmd = $raw.Trim().ToLowerInvariant()
+
+        $vk = switch ($cmd) {
+            ''       { 13 }
+            'enter'  { 13 }
+            'up'     { 38 }
+            'k'      { 38 }
+            'down'   { 40 }
+            'j'      { 40 }
+            'space'  { 32 }
+            'toggle' { 32 }
+            'a'      { 65 }
+            'all'    { 65 }
+            'n'      { 78 }
+            'none'   { 78 }
+            'q'      { 81 }
+            'quit'   { 81 }
+            'esc'    { 27 }
+            'escape' { 27 }
+            default  { 0 }
+        }
+
+        $char = if ($cmd.Length -gt 0) { [char]$cmd[0] } else { [char]13 }
+        return [pscustomobject]@{
+            VirtualKeyCode = $vk
+            Character      = $char
+        }
+    } finally {
+        $ErrorActionPreference = $savedErrorPref
+    }
+}
+
+function Write-WimoCard {
+    <#
+    .SYNOPSIS
+        Renders a modern rounded card block.
+    #>
+    param(
+        [string]$Title,
+        [string[]]$Lines,
+        [string]$AccentColor = $C.SageLight,
+        [int]$Width = 0,
+        [switch]$ShowBottomBorder
+    )
+
+    if ($Width -le 0) {
+        $Width = [Math]::Min(96, (Get-TerminalWidth) - 4)
+    }
+    $Width = [Math]::Max(40, $Width)
+    $inner = $Width - 2
+
+    Write-Host "  $($C.Grey)╭$('─' * $inner)╮$($C.Reset)"
+
+    $titleText = "  $Title"
+    $titlePad = [Math]::Max(0, $inner - (Get-DisplayWidth $titleText))
+    Write-Host "  $($C.Grey)│$($C.Reset)$($C.Bold)$AccentColor$titleText$($C.Reset)$(' ' * $titlePad)$($C.Grey)│$($C.Reset)"
+    Write-Host "  $($C.Grey)├$('─' * $inner)┤$($C.Reset)"
+
+    foreach ($line in $Lines) {
+        $plainW = Get-DisplayWidth $line
+        $pad = [Math]::Max(0, $inner - $plainW)
+        Write-Host "  $($C.Grey)│$($C.Reset)$line$(' ' * $pad)$($C.Grey)│$($C.Reset)"
+    }
+
+    if ($ShowBottomBorder) {
+        Write-Host "  $($C.Grey)╰$('─' * $inner)╯$($C.Reset)"
+    }
+}
+
 function Show-InteractiveMenu {
     <#
     .SYNOPSIS
@@ -93,10 +185,10 @@ function Show-InteractiveMenu {
             # Top border
             Write-Host "$pad$($C.Grey)╭$('─' * $inner)╮$($C.Reset)"
 
-            # Header — fixed known content
-            $hdrText = "  WiMo  ·  Windows System Optimizer"
-            $hdrFill = [Math]::Max(0, $inner - $hdrText.Length)
-            Write-Host "$pad$($C.Grey)│$($C.Reset)$($C.Bold)$($C.Orange)$hdrText$($C.Reset)$(' ' * $hdrFill)$($C.Grey)│$($C.Reset)"
+            # Header
+            $hdrText = "  WiMo  ·  Modern Windows TUI Toolkit"
+            $hdrFill = [Math]::Max(0, $inner - (Get-DisplayWidth $hdrText))
+            Write-Host "$pad$($C.Grey)│$($C.Reset)$($C.Bold)$($C.SageLight)$hdrText$($C.Reset)$(' ' * $hdrFill)$($C.Grey)│$($C.Reset)"
 
             # Separator
             Write-Host "$pad$($C.Grey)├$('─' * $inner)┤$($C.Reset)"
@@ -135,15 +227,16 @@ function Show-InteractiveMenu {
             Write-Host "$pad$($C.Grey)├$('─' * $inner)┤$($C.Reset)"
 
             # Footer
-            $footerText = "  up/down navigate  ·  Enter select  ·  q quit"
+            $footerText = "  ↑/↓ navigate  ·  Enter select  ·  q quit"
             $footerFill = [Math]::Max(0, $inner - $footerText.Length)
             Write-Host "$pad$($C.Grey)│$footerText$(' ' * $footerFill)│$($C.Reset)"
 
             # Bottom border
             Write-Host "$pad$($C.Grey)╰$('─' * $inner)╯$($C.Reset)"
 
-            # Read key input
-            $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            # Read key input (safe + fallback)
+            $key = Read-WimoKey -FallbackPrompt "  Menu command"
+            if ($null -eq $key) { continue }
 
             switch ($key.VirtualKeyCode) {
                 38 { $selected = if ($selected -gt 0) { $selected - 1 } else { $menuItems.Count - 1 } }  # Up
