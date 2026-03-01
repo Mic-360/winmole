@@ -101,109 +101,157 @@ function Find-Artifacts {
         [int]$MaxDepth
     )
 
-    $found = @()
+    $found = [System.Collections.ArrayList]::new()
 
-    if (-not (Test-Path $ScanPath)) { return $found }
+    if (-not (Test-Path $ScanPath)) { return @() }
 
     Write-WimoLog "Scanning: $ScanPath (depth: $MaxDepth)" -Level Debug
 
-    # Walk directories
-    $dirs = Get-ChildItem -Path $ScanPath -Directory -Recurse -Depth $MaxDepth -Force -ErrorAction SilentlyContinue
+    # Fast .NET directory walk — collect candidate paths first, defer sizing
+    $candidates = [System.Collections.ArrayList]::new()
+    $artifactKeys = $ArtifactDirs.Keys
+    $contextKeys  = $ContextArtifacts.Keys
 
-    $totalDirs = $dirs.Count
-    $processed = 0
+    function Walk-Dir {
+        param([string]$Dir, [int]$CurrentDepth)
+        if ($CurrentDepth -gt $MaxDepth) { return }
+        try {
+            foreach ($sub in [System.IO.Directory]::EnumerateDirectories($Dir)) {
+                $name = [System.IO.Path]::GetFileName($sub)
 
-    foreach ($dir in $dirs) {
-        $processed++
-        $pct = if ($totalDirs -gt 0) { [Math]::Floor($processed / $totalDirs * 100) } else { 0 }
-
-        if ($processed % 50 -eq 0) {
-            Show-ProgressLine -Label "Scanning..." -Percent $pct -Detail "$processed / $totalDirs dirs"
-        }
-
-        $dirName = $dir.Name
-
-        # Direct artifact match
-        if ($ArtifactDirs.ContainsKey($dirName)) {
-            $size = Get-FolderSize $dir.FullName
-            if ($size -gt 0) {
-                $parentProject = Split-Path $dir.Parent.FullName -Leaf
-                $daysSinceModified = ([datetime]::Now - $dir.LastWriteTime).Days
-                $isRecent = $daysSinceModified -lt 7
-
-                $found += @{
-                    Label       = "$parentProject/$dirName"
-                    Path        = $dir.FullName
-                    Size        = $size
-                    SizeText    = Format-FileSize $size
-                    Type        = $ArtifactDirs[$dirName]
-                    Recent      = $isRecent
-                    Selected    = -not $isRecent  # Leave recent items unchecked
-                    DaysOld     = $daysSinceModified
+                if ($artifactKeys -contains $name) {
+                    [void]$candidates.Add(@{ Path = $sub; Name = $name; Kind = 'direct' })
+                    continue  # don't recurse into artifact dirs
                 }
-            }
-        }
 
-        # Context-sensitive artifact match
-        if ($ContextArtifacts.ContainsKey($dirName)) {
-            $ctx = $ContextArtifacts[$dirName]
-            $parentDir = $dir.Parent.FullName
-            $hasIndicator = $false
-            foreach ($indicator in $ctx.Indicators) {
-                if (Test-Path (Join-Path $parentDir $indicator)) {
-                    $hasIndicator = $true
-                    break
-                }
-            }
-            if ($hasIndicator) {
-                $size = Get-FolderSize $dir.FullName
-                if ($size -gt 0) {
-                    $parentProject = Split-Path $parentDir -Leaf
-                    $daysSinceModified = ([datetime]::Now - $dir.LastWriteTime).Days
-                    $isRecent = $daysSinceModified -lt 7
-
-                    $found += @{
-                        Label       = "$parentProject/$dirName"
-                        Path        = $dir.FullName
-                        Size        = $size
-                        SizeText    = Format-FileSize $size
-                        Type        = $ctx.Label
-                        Recent      = $isRecent
-                        Selected    = -not $isRecent
-                        DaysOld     = $daysSinceModified
+                if ($contextKeys -contains $name) {
+                    $ctx = $ContextArtifacts[$name]
+                    $parentDir = [System.IO.Path]::GetDirectoryName($sub)
+                    foreach ($indicator in $ctx.Indicators) {
+                        if ([System.IO.File]::Exists([System.IO.Path]::Combine($parentDir, $indicator))) {
+                            [void]$candidates.Add(@{ Path = $sub; Name = $name; Kind = 'context' })
+                            break
+                        }
                     }
+                    continue
                 }
-            }
-        }
 
-        # Flutter project detection
-        if (Test-Path (Join-Path $dir.FullName "pubspec.yaml")) {
-            foreach ($subPath in $FlutterSubArtifacts) {
-                $fullSubPath = Join-Path $dir.FullName $subPath
-                if (Test-Path $fullSubPath) {
-                    $size = Get-FolderSize $fullSubPath
-                    if ($size -gt 0) {
-                        $projectName = $dir.Name
-                        $found += @{
-                            Label       = "$projectName/$subPath"
-                            Path        = $fullSubPath
-                            Size        = $size
-                            SizeText    = Format-FileSize $size
-                            Type        = "Flutter build artifact"
-                            Recent      = $false
-                            Selected    = $true
-                            DaysOld     = ([datetime]::Now - (Get-Item $fullSubPath).LastWriteTime).Days
+                # Flutter detection
+                if ([System.IO.File]::Exists([System.IO.Path]::Combine($sub, 'pubspec.yaml'))) {
+                    foreach ($subRel in $FlutterSubArtifacts) {
+                        $fullSubPath = [System.IO.Path]::Combine($sub, $subRel)
+                        if ([System.IO.Directory]::Exists($fullSubPath)) {
+                            [void]$candidates.Add(@{ Path = $fullSubPath; Name = $subRel; Kind = 'flutter'; ProjectDir = $sub })
                         }
                     }
                 }
+
+                Walk-Dir -Dir $sub -CurrentDepth ($CurrentDepth + 1)
+            }
+        } catch {}
+    }
+
+    Walk-Dir -Dir $ScanPath -CurrentDepth 0
+
+    if ($candidates.Count -eq 0) {
+        Write-Host "`r$(' ' * 80)`r" -NoNewline
+        return @()
+    }
+
+    # Parallel size calculation using runspace pool
+    $poolSize = [Math]::Min(16, [Math]::Max(1, $candidates.Count))
+    $pool = [runspacefactory]::CreateRunspacePool(1, $poolSize)
+    $pool.Open()
+
+    $sizeJobs = @()
+    foreach ($c in $candidates) {
+        $ps = [powershell]::Create().AddScript({
+            param($p)
+            [long]$sz = 0
+            try {
+                foreach ($f in [System.IO.Directory]::EnumerateFiles($p, '*', [System.IO.SearchOption]::AllDirectories)) {
+                    try { $sz += ([System.IO.FileInfo]::new($f)).Length } catch {}
+                }
+            } catch {}
+            return $sz
+        }).AddArgument($c.Path)
+        $ps.RunspacePool = $pool
+        $sizeJobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Candidate = $c }
+    }
+
+    $totalCandidates = $sizeJobs.Count
+    $processed = 0
+
+    foreach ($job in $sizeJobs) {
+        $size = $job.Pipe.EndInvoke($job.Handle)
+        if ($null -eq $size) { $size = 0 } else { $size = [long]$size }
+        $job.Pipe.Dispose()
+        $c = $job.Candidate
+        $processed++
+
+        if ($processed % 20 -eq 0) {
+            $pct = [Math]::Floor($processed / $totalCandidates * 100)
+            Show-ProgressLine -Label "Sizing..." -Percent $pct -Detail "$processed / $totalCandidates dirs"
+        }
+
+        if ($size -le 0) { continue }
+
+        $dirInfo = [System.IO.DirectoryInfo]::new($c.Path)
+        $daysSinceModified = ([datetime]::Now - $dirInfo.LastWriteTime).Days
+        $isRecent = $daysSinceModified -lt 7
+
+        switch ($c.Kind) {
+            'direct' {
+                $parentProject = [System.IO.Path]::GetFileName($dirInfo.Parent.FullName)
+                [void]$found.Add(@{
+                    Label       = "$parentProject/$($c.Name)"
+                    Path        = $c.Path
+                    Size        = $size
+                    SizeText    = Format-FileSize $size
+                    Type        = $ArtifactDirs[$c.Name]
+                    Recent      = $isRecent
+                    Selected    = -not $isRecent
+                    DaysOld     = $daysSinceModified
+                })
+            }
+            'context' {
+                $parentDir = [System.IO.Path]::GetDirectoryName($c.Path)
+                $parentProject = [System.IO.Path]::GetFileName($parentDir)
+                $ctx = $ContextArtifacts[$c.Name]
+                [void]$found.Add(@{
+                    Label       = "$parentProject/$($c.Name)"
+                    Path        = $c.Path
+                    Size        = $size
+                    SizeText    = Format-FileSize $size
+                    Type        = $ctx.Label
+                    Recent      = $isRecent
+                    Selected    = -not $isRecent
+                    DaysOld     = $daysSinceModified
+                })
+            }
+            'flutter' {
+                $projectName = [System.IO.Path]::GetFileName($c.ProjectDir)
+                [void]$found.Add(@{
+                    Label       = "$projectName/$($c.Name)"
+                    Path        = $c.Path
+                    Size        = $size
+                    SizeText    = Format-FileSize $size
+                    Type        = "Flutter build artifact"
+                    Recent      = $false
+                    Selected    = $true
+                    DaysOld     = $daysSinceModified
+                })
             }
         }
     }
 
+    $pool.Close()
+    $pool.Dispose()
+
     # Clear progress line
     Write-Host "`r$(' ' * 80)`r" -NoNewline
 
-    return $found
+    return $found.ToArray()
 }
 
 # Main execution
@@ -291,16 +339,50 @@ Write-Host ""
 $freedTotal = [long]0
 $removedCount = 0
 
+# Parallel deletion using runspace pool for speed
+$delPool = [runspacefactory]::CreateRunspacePool(1, [Math]::Min(8, $selectedArtifacts.Count))
+$delPool.Open()
+
+$delJobs = @()
 foreach ($artifact in $selectedArtifacts) {
-    $result = Remove-SafePath -Path $artifact.Path
-    if ($result.Success) {
-        Show-ScanItem -Status Success -Label $artifact.Label -Size $artifact.SizeText
-        $freedTotal += $result.BytesFreed
+    $ps = [powershell]::Create().AddScript({
+        param($p)
+        try {
+            if ([System.IO.Directory]::Exists($p)) {
+                [System.IO.Directory]::Delete($p, $true)
+                return @{ Success = $true; Error = $null }
+            }
+            return @{ Success = $false; Error = "Not found" }
+        } catch {
+            # Fallback
+            try {
+                Remove-Item -Path $p -Recurse -Force -ErrorAction Stop
+                return @{ Success = $true; Error = $null }
+            } catch {
+                return @{ Success = $false; Error = $_.Exception.Message }
+            }
+        }
+    }).AddArgument($artifact.Path)
+    $ps.RunspacePool = $delPool
+    $delJobs += @{ Pipe = $ps; Handle = $ps.BeginInvoke(); Artifact = $artifact }
+}
+
+foreach ($job in $delJobs) {
+    $result = $job.Pipe.EndInvoke($job.Handle)
+    $job.Pipe.Dispose()
+    $a = $job.Artifact
+    if ($null -ne $result -and $result.Success) {
+        Show-ScanItem -Status Success -Label $a.Label -Size $a.SizeText
+        $freedTotal += $a.Size
         $removedCount++
     } else {
-        Show-ScanItem -Status Error -Label $artifact.Label -Size $artifact.SizeText -Badge $result.Reason
+        $reason = if ($null -ne $result) { $result.Error } else { "Unknown error" }
+        Show-ScanItem -Status Error -Label $a.Label -Size $a.SizeText -Badge $reason
     }
 }
+
+$delPool.Close()
+$delPool.Dispose()
 
 Write-Host ""
 Show-Summary -MainText "Purged $removedCount directories" -SubText "Freed: $(Format-FileSize $freedTotal)"
