@@ -149,12 +149,13 @@ type model struct {
 	stats  systemStats
 	width  int
 	height int
+	scroll int
 }
 
 // ━━━ Bubbletea ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 func initialModel() model {
-	return model{width: 80, height: 24, stats: systemStats{diskLetter: "C:"}}
+	return model{width: 80, height: 24, scroll: 0, stats: systemStats{diskLetter: "C:"}}
 }
 
 func (m model) Init() tea.Cmd {
@@ -166,8 +167,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.scroll = clampInt(m.scroll, 0, m.maxScrollOffset())
 	case tickMsg:
 		m.stats = gatherStats(m.stats)
+		m.scroll = clampInt(m.scroll, 0, m.maxScrollOffset())
 		return m, tick()
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -175,8 +178,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "r":
 			m.stats = gatherStats(m.stats)
+			m.scroll = clampInt(m.scroll, 0, m.maxScrollOffset())
 			return m, tick()
+		case "up", "k":
+			m.scroll--
+		case "down", "j":
+			m.scroll++
+		case "pgup", "ctrl+b", "b":
+			m.scroll -= max(1, m.height/2)
+		case "pgdown", "ctrl+f", "f":
+			m.scroll += max(1, m.height/2)
+		case "home", "g":
+			m.scroll = 0
+		case "end", "G":
+			m.scroll = m.maxScrollOffset()
 		}
+		m.scroll = clampInt(m.scroll, 0, m.maxScrollOffset())
 	}
 	return m, nil
 }
@@ -549,7 +566,7 @@ func calculateHealth(s systemStats) int {
 
 // ━━━ View ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-func (m model) View() string {
+func (m model) renderBody() string {
 	w := m.width
 	if w < 30 {
 		w = 80
@@ -576,9 +593,8 @@ func (m model) View() string {
 	gpuCard := m.viewGPU(cardW)
 	batCard := m.viewBattery(cardW, gaugeW)
 
-	var body string
 	if narrow {
-		body = lipgloss.JoinVertical(lipgloss.Left,
+		return lipgloss.JoinVertical(lipgloss.Left,
 			header, cpuCard, memCard, disksCard, netCard, gpuCard, procCard, sysCard, batCard,
 		)
 	} else {
@@ -586,11 +602,30 @@ func (m model) View() string {
 		r2 := lipgloss.JoinHorizontal(lipgloss.Top, disksCard, " ", netCard)
 		r3 := lipgloss.JoinHorizontal(lipgloss.Top, gpuCard, " ", batCard)
 		r4 := lipgloss.JoinHorizontal(lipgloss.Top, procCard, " ", sysCard)
-		body = lipgloss.JoinVertical(lipgloss.Left, header, r1, r2, r3, r4)
+		return lipgloss.JoinVertical(lipgloss.Left, header, r1, r2, r3, r4)
 	}
+}
 
-	help := m.viewHelp()
-	return body + "\n" + help + "\n"
+func (m model) View() string {
+	body := m.renderBody()
+	lines := strings.Split(body, "\n")
+
+	visibleBodyLines := max(1, m.height-2) // reserve one line for help/scroll hint
+	maxOffset := max(0, len(lines)-visibleBodyLines)
+	offset := clampInt(m.scroll, 0, maxOffset)
+	end := min(len(lines), offset+visibleBodyLines)
+
+	view := strings.Join(lines[offset:end], "\n")
+
+	help := m.viewHelp(maxOffset > 0, offset, maxOffset)
+	return view + "\n" + help + "\n"
+}
+
+func (m model) maxScrollOffset() int {
+	body := m.renderBody()
+	lines := strings.Split(body, "\n")
+	visibleBodyLines := max(1, m.height-2)
+	return max(0, len(lines)-visibleBodyLines)
 }
 
 func (m model) viewHeader(w int) string {
@@ -853,15 +888,35 @@ func (m model) viewBattery(w, gw int) string {
 	return newCardStyle(w).Render(strings.Join(lines, "\n"))
 }
 
-func (m model) viewHelp() string {
-	return "  " +
+func (m model) viewHelp(scrollable bool, offset int, maxOffset int) string {
+	base := "  " +
 		lipgloss.NewStyle().Bold(true).Foreground(clrText).Render("q") + " " +
 		dimStyle.Render("quit") +
 		dimStyle.Render(" · ") +
 		lipgloss.NewStyle().Bold(true).Foreground(clrText).Render("r") + " " +
 		dimStyle.Render("refresh") +
 		dimStyle.Render(" · ") +
+		lipgloss.NewStyle().Bold(true).Foreground(clrText).Render("j/k") + " " +
+		dimStyle.Render("scroll") +
+		dimStyle.Render(" · ") +
+		lipgloss.NewStyle().Bold(true).Foreground(clrText).Render("PgUp/PgDn") + " " +
+		dimStyle.Render("page") +
+		dimStyle.Render(" · ") +
 		dimStyle.Render("refreshing every 2s")
+
+	if !scrollable {
+		return base
+	}
+
+	indicator := dimStyle.Render(fmt.Sprintf("  ·  scroll %d/%d", offset+1, maxOffset+1))
+	if offset > 0 {
+		indicator += dimStyle.Render("  ↑")
+	}
+	if offset < maxOffset {
+		indicator += dimStyle.Render("  ↓")
+	}
+
+	return base + indicator
 }
 
 // ━━━ Bar Rendering ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
