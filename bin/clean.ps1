@@ -104,6 +104,12 @@ $CleanTargetsAdmin = @(
     @{ Label = "DISM logs";                      Path = "C:\Windows\Logs\DISM" }
     @{ Label = "Memory dump files";              Path = "C:\Windows\Minidump" }
     @{ Label = "Old memory dump";                Path = "C:\Windows\MEMORY.DMP" }
+    @{ Label = "Delivery Optimization cache";    Path = "C:\Windows\SoftwareDistribution\DeliveryOptimization" }
+    @{ Label = "Windows setup logs";             Path = "C:\Windows\Panther" }
+    @{ Label = "Windows Error Reporting";        Path = "C:\ProgramData\Microsoft\Windows\WER" }
+    @{ Label = "System event trace logs";        Path = "C:\Windows\System32\LogFiles\WMI" }
+    @{ Label = "Windows Defender scan data";     Path = "C:\ProgramData\Microsoft\Windows Defender\Scans\History" }
+    @{ Label = "IIS logs";                       Path = "C:\inetpub\logs\LogFiles" }
 )
 
 $WindowsOldPath = "C:\Windows.old"
