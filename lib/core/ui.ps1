@@ -202,7 +202,7 @@ function Show-InteractiveMenu {
                 # Build the visible content and calculate its display columns
                 if ($i -eq $selected) {
                     $icon = "$($C.SageGreen)$($item.Icon)$($C.Reset)"
-                    $prefix = " $($C.Green)>$($C.Reset) "
+                    $prefix = " $($C.Cyan)▶$($C.Reset) "
                     $labelPart = "$($C.Bold)$($C.White)$($item.Label)$($C.Reset)"
                     $descPart = "$($C.SageLight)$($item.Desc)$($C.Reset)"
                     $visibleLen = 3 + $item.Icon.Length + 2 + $item.Label.Length + 4 + $item.Desc.Length
@@ -302,6 +302,8 @@ function Show-Checkbox {
     [Console]::CursorVisible = $false
 
     try {
+        $savedErrorPref = $ErrorActionPreference
+        $ErrorActionPreference = 'Stop'
         $startTop = [Console]::CursorTop
 
         while ($running) {
@@ -312,10 +314,10 @@ function Show-Checkbox {
             $boxWidth = [Math]::Min([Math]::Max($totalColWidth, $Title.Length + 8), $width - 4)
 
             # Title bar
-            Write-Host "  $($C.Grey)┌$('─' * ($boxWidth - 2))┐$($C.Reset)"
-            $titleLine = "  $Title  (Space: toggle · Enter: confirm · q: cancel)"
+            Write-Host "  $($C.Grey)╭$('─' * ($boxWidth - 2))╮$($C.Reset)"
+            $titleLine = "  $Title  ·  Space toggle · Enter confirm · q cancel"
             $titlePad = [Math]::Max(0, $boxWidth - 2 - $titleLine.Length)
-            Write-Host "  $($C.Grey)│$($C.Reset)$($C.Bold)$titleLine$($C.Reset)$(' ' * $titlePad)$($C.Grey)│$($C.Reset)"
+            Write-Host "  $($C.Grey)│$($C.Reset)$($C.Bold)$($C.SageLight)$titleLine$($C.Reset)$(' ' * $titlePad)$($C.Grey)│$($C.Reset)"
 
             # Column headers
             $headerLine = "  "
@@ -353,25 +355,26 @@ function Show-Checkbox {
 
                 if ($isSelected) {
                     $bg = $C.BgSelected
-                    Write-Host "  $($C.Grey)│$($C.Reset) $bg$($C.Bold)$line$($C.Reset)$($C.Grey)│$($C.Reset)"
+                    Write-Host "  $($C.Grey)│$($C.Reset) $bg$($C.Bold)$($C.White)$line$($C.Reset)$($C.Grey)│$($C.Reset)"
                 } else {
                     Write-Host "  $($C.Grey)│$($C.Reset) $line$($C.Grey)│$($C.Reset)"
                 }
             }
 
             # Bottom border
-            Write-Host "  $($C.Grey)└$('─' * ($boxWidth - 2))┘$($C.Reset)"
+            Write-Host "  $($C.Grey)╰$('─' * ($boxWidth - 2))╯$($C.Reset)"
 
             # Status line
             $selectedCount = ($Items | Where-Object { $_.Selected }).Count
             $selectedSize = ($Items | Where-Object { $_.Selected } | Measure-Object -Property Size -Sum).Sum
             if ($null -eq $selectedSize) { $selectedSize = 0 }
-            Write-Host "  $($C.Bold)Selected: $selectedCount items · $(Format-FileSize $selectedSize)$($C.Reset)  · A: all · N: none       "
+            Write-Host "  $($C.Bold)$($C.SageLight)Selected:$($C.Reset) $selectedCount items · $(Format-FileSize $selectedSize)  · A all · N none"
 
             # Clear any leftover lines
             Write-Host "                                                                              "
 
-            $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+            $key = Read-WimoKey -FallbackPrompt "  Selection command"
+            if ($null -eq $key) { continue }
 
             switch ($key.VirtualKeyCode) {
                 38 { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $Items.Count - 1 } }  # Up
@@ -383,7 +386,7 @@ function Show-Checkbox {
                     $running = $false
                 }
                 default {
-                    switch ($key.Character) {
+                    switch ($key.Character.ToString().ToLowerInvariant()) {
                         'j' { $cursor = if ($cursor -lt $Items.Count - 1) { $cursor + 1 } else { 0 } }
                         'k' { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $Items.Count - 1 } }
                         ' ' { $Items[$cursor].Selected = -not $Items[$cursor].Selected }
@@ -398,10 +401,11 @@ function Show-Checkbox {
             }
         }
     } finally {
+        $ErrorActionPreference = $savedErrorPref
         [Console]::CursorVisible = $true
     }
 
-    return ($Items | Where-Object { $_.Selected })
+    return @($Items | Where-Object { $_.Selected })
 }
 
 function Show-Progress {
@@ -468,10 +472,10 @@ function Show-Summary {
     if ($SubText) { $content += "    $SubText" }
     $boxWidth = [Math]::Max($content.Length + 6, 50)
 
-    Write-Host "  $($C.Green)╔$('═' * ($boxWidth - 2))╗$($C.Reset)"
+    Write-Host "  $($C.Green)╭$('─' * ($boxWidth - 2))╮$($C.Reset)"
     $pad = [Math]::Max(0, $boxWidth - 2 - $content.Length)
-    Write-Host "  $($C.Green)║$($C.Reset)$($C.Bold)$content$($C.Reset)$(' ' * $pad)$($C.Green)║$($C.Reset)"
-    Write-Host "  $($C.Green)╚$('═' * ($boxWidth - 2))╝$($C.Reset)"
+    Write-Host "  $($C.Green)│$($C.Reset)$($C.Bold)$content$($C.Reset)$(' ' * $pad)$($C.Green)│$($C.Reset)"
+    Write-Host "  $($C.Green)╰$('─' * ($boxWidth - 2))╯$($C.Reset)"
     Write-Host ""
 }
 
