@@ -170,6 +170,33 @@ function Merge-AppLists {
     return $merged.Values | Sort-Object { $_.Name }
 }
 
+function Get-ScalarValue {
+    param(
+        $Value,
+        $Default = ""
+    )
+
+    if ($null -eq $Value) { return $Default }
+    if ($Value -is [string]) {
+        if ([string]::IsNullOrWhiteSpace($Value)) { return $Default }
+        return $Value
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $arr = @($Value)
+        if ($arr.Count -eq 0) { return $Default }
+        foreach ($entry in $arr) {
+            if ($null -eq $entry) { continue }
+            if ($entry -is [string]) {
+                if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+                return $entry
+            }
+            return $entry
+        }
+        return $Default
+    }
+    return $Value
+}
+
 function Invoke-Uninstall {
     param($App)
 
