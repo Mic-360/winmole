@@ -1,4 +1,4 @@
-module github.com/wimo/wimo
+module github.com/mic-360/wimo
 
 go 1.24.0
 
