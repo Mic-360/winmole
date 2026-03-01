@@ -499,7 +499,8 @@ $searchTerm = Read-Host
 
 if ($searchTerm) {
     $allApps = @($allApps | Where-Object {
-        $_.Name -like "*$searchTerm*" -or $_.Publisher -like "*$searchTerm*"
+        ([string](Get-ScalarValue -Value $_.Name -Default "") -like "*$searchTerm*") -or
+        ([string](Get-ScalarValue -Value $_.Publisher -Default "") -like "*$searchTerm*")
     })
     if ($allApps.Count -eq 0) {
         Write-ColorLine "  No apps matching '$searchTerm'." -Color $C.Grey
@@ -513,31 +514,70 @@ Write-Host ""
 # Prepare items for checkbox — use plain text source badges for correct alignment
 $checkboxItems = @()
 foreach ($app in $allApps) {
+    $name = [string](Get-ScalarValue -Value $app.Name -Default "")
+    if ([string]::IsNullOrWhiteSpace($name)) { continue }
+
+    [long]$size = 0
+    try {
+        $size = [long](Get-ScalarValue -Value $app.Size -Default 0)
+    } catch {
+        $size = 0
+    }
+
+    $installDate = [string](Get-ScalarValue -Value $app.InstallDate -Default "")
+    $source = [string](Get-ScalarValue -Value $app.Source -Default "registry")
+    if ([string]::IsNullOrWhiteSpace($source)) { $source = "registry" }
+
+    $sizeText = [string](Get-ScalarValue -Value $app.SizeText -Default "")
+    if ([string]::IsNullOrWhiteSpace($sizeText)) {
+        $sizeText = if ($size -gt 0) { Format-FileSize $size } else { "Unknown" }
+    }
+
+    $normalizedApp = @{
+        Name                 = $name.Trim()
+        Version              = [string](Get-ScalarValue -Value $app.Version -Default "")
+        Publisher            = [string](Get-ScalarValue -Value $app.Publisher -Default "")
+        InstallDate          = $installDate
+        Size                 = $size
+        SizeText             = $sizeText
+        UninstallString      = [string](Get-ScalarValue -Value $app.UninstallString -Default "")
+        QuietUninstallString = [string](Get-ScalarValue -Value $app.QuietUninstallString -Default "")
+        Source               = $source
+        WingetId             = [string](Get-ScalarValue -Value $app.WingetId -Default "")
+        LocalPath            = [string](Get-ScalarValue -Value $app.LocalPath -Default "")
+    }
+
     $age = ""
-    if ($app.InstallDate) {
+    if ($installDate) {
         try {
-            $installed = [datetime]::Parse($app.InstallDate)
+            $installed = [datetime]::Parse($installDate)
             $daysSince = ([datetime]::Now - $installed).Days
             if ($daysSince -gt 180) { $age = "Old" } else { $age = "Recent" }
         } catch {}
     }
 
-    $sourceBadge = switch ($app.Source) {
+    $sourceBadge = switch ($source) {
         'winget'   { "winget" }
         'registry' { "registry" }
         'local'    { "local" }
+        default    { $source }
     }
 
     $checkboxItems += @{
-        Label      = $app.Name
-        SizeText   = $app.SizeText
-        InstDate   = $app.InstallDate
+        Label      = $normalizedApp.Name
+        SizeText   = $normalizedApp.SizeText
+        InstDate   = $normalizedApp.InstallDate
         SourceBadge = $sourceBadge
         Age        = $age
-        Size       = $app.Size
+        Size       = $normalizedApp.Size
         Selected   = $false
-        AppData    = $app
+        AppData    = $normalizedApp
     }
+}
+
+if ($checkboxItems.Count -eq 0) {
+    Write-ColorLine "  No installed applications found after normalization." -Color $C.Grey
+    return
 }
 
 $columns = @(
@@ -549,6 +589,7 @@ $columns = @(
 )
 
 $selectedApps = Show-Checkbox -Items $checkboxItems -Title "Select apps to remove" -Columns $columns
+$selectedApps = @($selectedApps | Where-Object { $null -ne $_ -and $null -ne $_.AppData })
 
 if ($selectedApps.Count -eq 0) {
     Write-Host ""
@@ -558,6 +599,7 @@ if ($selectedApps.Count -eq 0) {
 
 Write-Host ""
 $totalSize = ($selectedApps | Measure-Object -Property Size -Sum).Sum
+if ($null -eq $totalSize) { $totalSize = 0 }
 Write-ColorLine "  Selected $($selectedApps.Count) apps ($(Format-FileSize $totalSize))" -Color $C.Orange
 
 if (-not (Confirm-Action "Uninstall $($selectedApps.Count) selected applications?")) {
