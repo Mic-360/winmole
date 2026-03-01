@@ -153,7 +153,7 @@ function Show-InteractiveMenu {
                     [Console]::CursorVisible = $true
                     Clear-Host
                     $cmd = $menuItems[$selected].Command
-                    & "$PSScriptRoot\..\..\bin\$cmd.ps1"
+                    & "$script:WimoRoot\bin\$cmd.ps1"
                     return
                 }
                 27 { $running = $false }  # Escape

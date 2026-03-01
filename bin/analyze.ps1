@@ -36,11 +36,4 @@ if (-not (Test-Path $goBinary)) {
 }
 
 # Forward all args to the Go binary
-# Use Start-Process with -NoNewWindow -Wait so the Go TUI (bubbletea)
-# gets direct console access for alt-screen and raw input
-$argStr = ($args | ForEach-Object { $_ }) -join ' '
-if ($argStr) {
-    Start-Process -FilePath $goBinary -ArgumentList $argStr -NoNewWindow -Wait
-} else {
-    Start-Process -FilePath $goBinary -NoNewWindow -Wait
-}
+& $goBinary @args
