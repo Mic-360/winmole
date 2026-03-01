@@ -149,7 +149,7 @@ function Show-Banner {
         Start-Sleep -Milliseconds 15
     }
     Write-Host ""
-    Write-Host (Center-Text "$($C.Bold)$($C.Orange)W i M o$($C.Reset)  �  $($C.Green)v$script:WIMO_VERSION$($C.Reset)" $width)
+    Write-Host (Center-Text "$($C.Bold)$($C.Orange)W i M o$($C.Reset)  ·  $($C.Green)v$script:WIMO_VERSION$($C.Reset)" $width)
     Write-Host (Center-Text "$($C.Grey)Windows System Optimizer$($C.Reset)" $width)
     Write-Host ""
 }
