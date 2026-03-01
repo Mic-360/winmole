@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/exec"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,7 +24,7 @@ import (
 const (
 	version      = "1.0.0"
 	refreshRate  = 2 * time.Second
-	maxProcesses = 5
+	maxProcesses = 10
 )
 
 // ━━━ Color Palette (Catppuccin Mocha) ━━━━━━━━━━━━━━━━━━
@@ -69,6 +71,33 @@ func newCardStyle(w int) lipgloss.Style {
 
 type tickMsg time.Time
 
+type gpuInfo struct {
+	name   string
+	vram   string
+	driver string
+}
+
+type batteryInfo struct {
+	percent   int
+	charging  bool
+	present   bool
+}
+
+type diskPartInfo struct {
+	mount   string
+	total   uint64
+	used    uint64
+	free    uint64
+	percent float64
+	fstype  string
+}
+
+type netIfaceInfo struct {
+	name     string
+	bytesSent uint64
+	bytesRecv uint64
+}
+
 type systemStats struct {
 	cpuPercent  float64
 	cpuModel    string
@@ -95,8 +124,18 @@ type systemStats struct {
 	hostname    string
 	osVersion   string
 	uptime      uint64
+	bootTime    uint64
 	topProcs    []procInfo
 	health      int
+	gpus        []gpuInfo
+	battery     batteryInfo
+	disks       []diskPartInfo
+	netIfaces   []netIfaceInfo
+	procCount   int
+	sysModel    string
+	sysMfg      string
+	biosVersion string
+	winBuild    string
 }
 
 type procInfo struct {
@@ -205,10 +244,12 @@ func gatherStats(prev systemStats) systemStats {
 		s.hostname = hostInfo.Hostname
 		s.osVersion = fmt.Sprintf("%s %s", hostInfo.Platform, hostInfo.PlatformVersion)
 		s.uptime = hostInfo.Uptime
+		s.bootTime = hostInfo.BootTime
 	}
 
 	procs, err := process.Processes()
 	if err == nil {
+		s.procCount = len(procs)
 		var procList []procInfo
 		for _, p := range procs {
 			name, _ := p.Name()
@@ -227,8 +268,150 @@ func gatherStats(prev systemStats) systemStats {
 		s.topProcs = procList
 	}
 
+	// All disk partitions
+	parts, err := disk.Partitions(false)
+	if err == nil {
+		var diskList []diskPartInfo
+		for _, p := range parts {
+			usage, err := disk.Usage(p.Mountpoint)
+			if err != nil || usage.Total == 0 {
+				continue
+			}
+			diskList = append(diskList, diskPartInfo{
+				mount:   p.Mountpoint,
+				total:   usage.Total,
+				used:    usage.Used,
+				free:    usage.Free,
+				percent: usage.UsedPercent,
+				fstype:  p.Fstype,
+			})
+		}
+		s.disks = diskList
+	}
+
+	// GPU info via WMI
+	s.gpus = getGPUs()
+
+	// Battery info via WMI
+	s.battery = getBattery()
+
+	// System model/manufacturer
+	s.sysModel, s.sysMfg = getSystemModel()
+
+	// Windows build
+	s.winBuild = getWinBuild()
+
+	// Network interfaces
+	netPerIface, err := net.IOCounters(true)
+	if err == nil {
+		for _, iface := range netPerIface {
+			if iface.BytesSent > 0 || iface.BytesRecv > 0 {
+				s.netIfaces = append(s.netIfaces, netIfaceInfo{
+					name:      iface.Name,
+					bytesSent: iface.BytesSent,
+					bytesRecv: iface.BytesRecv,
+				})
+			}
+		}
+		// Limit to top 5 by total traffic
+		sort.Slice(s.netIfaces, func(i, j int) bool {
+			return (s.netIfaces[i].bytesSent + s.netIfaces[i].bytesRecv) > (s.netIfaces[j].bytesSent + s.netIfaces[j].bytesRecv)
+		})
+		if len(s.netIfaces) > 5 {
+			s.netIfaces = s.netIfaces[:5]
+		}
+	}
+
 	s.health = calculateHealth(s)
 	return s
+}
+
+// ━━━ WMI Helpers ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+func getGPUs() []gpuInfo {
+	out, err := exec.Command("wmic", "path", "win32_VideoController", "get", "Name,AdapterRAM,DriverVersion", "/format:csv").CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var gpus []gpuInfo
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Node") {
+			continue
+		}
+		parts := strings.Split(line, ",")
+		if len(parts) < 4 {
+			continue
+		}
+		vramBytes, _ := strconv.ParseInt(strings.TrimSpace(parts[1]), 10, 64)
+		vram := formatBytes(uint64(vramBytes))
+		gpus = append(gpus, gpuInfo{
+			name:   strings.TrimSpace(parts[2]),
+			driver: strings.TrimSpace(parts[3]),
+			vram:   vram,
+		})
+	}
+	return gpus
+}
+
+func getBattery() batteryInfo {
+	out, err := exec.Command("wmic", "path", "Win32_Battery", "get", "EstimatedChargeRemaining,BatteryStatus", "/format:csv").CombinedOutput()
+	if err != nil {
+		return batteryInfo{}
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Node") {
+			continue
+		}
+		parts := strings.Split(line, ",")
+		if len(parts) < 3 {
+			continue
+		}
+		status, _ := strconv.Atoi(strings.TrimSpace(parts[1]))
+		pct, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+		return batteryInfo{
+			percent:  pct,
+			charging: status == 2,
+			present:  true,
+		}
+	}
+	return batteryInfo{}
+}
+
+func getSystemModel() (string, string) {
+	modelOut, err := exec.Command("wmic", "computersystem", "get", "Model", "/format:value").CombinedOutput()
+	model := ""
+	if err == nil {
+		for _, line := range strings.Split(string(modelOut), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "Model=") {
+				model = strings.TrimPrefix(strings.TrimSpace(line), "Model=")
+			}
+		}
+	}
+	mfgOut, err := exec.Command("wmic", "computersystem", "get", "Manufacturer", "/format:value").CombinedOutput()
+	mfg := ""
+	if err == nil {
+		for _, line := range strings.Split(string(mfgOut), "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "Manufacturer=") {
+				mfg = strings.TrimPrefix(strings.TrimSpace(line), "Manufacturer=")
+			}
+		}
+	}
+	return model, mfg
+}
+
+func getWinBuild() string {
+	out, err := exec.Command("wmic", "os", "get", "BuildNumber", "/format:value").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "BuildNumber=") {
+			return strings.TrimPrefix(strings.TrimSpace(line), "BuildNumber=")
+		}
+	}
+	return ""
 }
 
 func calculateHealth(s systemStats) int {
@@ -279,21 +462,24 @@ func (m model) View() string {
 	header := m.viewHeader(w)
 	cpuCard := m.viewCPU(cardW, gaugeW)
 	memCard := m.viewMem(cardW, gaugeW)
-	dskCard := m.viewDisk(cardW, gaugeW)
+	disksCard := m.viewDisks(cardW, gaugeW)
 	netCard := m.viewNet(cardW)
 	procCard := m.viewProcs(cardW)
 	sysCard := m.viewSys(cardW)
+	gpuCard := m.viewGPU(cardW)
+	batCard := m.viewBattery(cardW, gaugeW)
 
 	var body string
 	if narrow {
 		body = lipgloss.JoinVertical(lipgloss.Left,
-			header, cpuCard, memCard, dskCard, netCard, procCard, sysCard,
+			header, cpuCard, memCard, disksCard, netCard, gpuCard, procCard, sysCard, batCard,
 		)
 	} else {
 		r1 := lipgloss.JoinHorizontal(lipgloss.Top, cpuCard, " ", memCard)
-		r2 := lipgloss.JoinHorizontal(lipgloss.Top, dskCard, " ", netCard)
-		r3 := lipgloss.JoinHorizontal(lipgloss.Top, procCard, " ", sysCard)
-		body = lipgloss.JoinVertical(lipgloss.Left, header, r1, r2, r3)
+		r2 := lipgloss.JoinHorizontal(lipgloss.Top, disksCard, " ", netCard)
+		r3 := lipgloss.JoinHorizontal(lipgloss.Top, gpuCard, " ", batCard)
+		r4 := lipgloss.JoinHorizontal(lipgloss.Top, procCard, " ", sysCard)
+		body = lipgloss.JoinVertical(lipgloss.Left, header, r1, r2, r3, r4)
 	}
 
 	help := m.viewHelp()
@@ -307,6 +493,10 @@ func (m model) viewHeader(w int) string {
 	if s.osVersion != "" {
 		info += dimStyle.Render(" · " + s.osVersion)
 	}
+	if s.winBuild != "" {
+		info += dimStyle.Render(" (Build " + s.winBuild + ")")
+	}
+	info += dimStyle.Render(fmt.Sprintf(" · %d procs", s.procCount))
 	gap := max(2, w-4-lipgloss.Width(left)-lipgloss.Width(info))
 	content := left + strings.Repeat(" ", gap) + info
 
@@ -374,16 +564,32 @@ func (m model) viewMem(w, gw int) string {
 	return newCardStyle(w).Render(strings.Join(lines, "\n"))
 }
 
-func (m model) viewDisk(w, gw int) string {
+func (m model) viewDisks(w, gw int) string {
 	s := m.stats
 	lines := []string{
-		accentStyle.Render(fmt.Sprintf("▤  Disk (%s)", s.diskLetter)),
+		accentStyle.Render("▤  Disks"),
 		"",
-		labelStyle.Render("Used  ") + bar(s.diskPercent, gw) + valueStyle.Render(fmt.Sprintf(" %5.1f%%", s.diskPercent)),
-		labelStyle.Render("      ") + dimStyle.Render(formatBytes(s.diskUsed)+" / "+formatBytes(s.diskTotal)),
-		"",
-		labelStyle.Render("Free  ") + valueStyle.Render(formatBytes(s.diskFree)),
-		labelStyle.Render("Total ") + dimStyle.Render(formatBytes(s.diskTotal)),
+	}
+
+	if len(s.disks) > 0 {
+		for _, d := range s.disks {
+			mount := d.mount
+			if len(mount) > 3 {
+				mount = mount[:3]
+			}
+			bw := max(4, gw-4)
+			lines = append(lines,
+				labelStyle.Render(fmt.Sprintf("%-3s ", mount))+bar(d.percent, bw)+valueStyle.Render(fmt.Sprintf(" %5.1f%%", d.percent)),
+				labelStyle.Render("    ")+dimStyle.Render(fmt.Sprintf("%s / %s  free: %s  %s", formatBytes(d.used), formatBytes(d.total), formatBytes(d.free), d.fstype)),
+			)
+		}
+	} else {
+		lines = append(lines,
+			labelStyle.Render("Used  ")+bar(s.diskPercent, gw)+valueStyle.Render(fmt.Sprintf(" %5.1f%%", s.diskPercent)),
+			labelStyle.Render("      ")+dimStyle.Render(formatBytes(s.diskUsed)+" / "+formatBytes(s.diskTotal)),
+			"",
+			labelStyle.Render("Free  ")+valueStyle.Render(formatBytes(s.diskFree)),
+		)
 	}
 	return newCardStyle(w).Render(strings.Join(lines, "\n"))
 }
@@ -399,15 +605,32 @@ func (m model) viewNet(w int) string {
 		labelStyle.Render("  Sent  ") + dimStyle.Render(formatBytes(s.netSent)),
 		labelStyle.Render("  Recv  ") + dimStyle.Render(formatBytes(s.netRecv)),
 	}
+
+	if len(s.netIfaces) > 0 {
+		lines = append(lines, "")
+		maxIfaces := min(3, len(s.netIfaces))
+		for i := 0; i < maxIfaces; i++ {
+			iface := s.netIfaces[i]
+			name := iface.name
+			if len(name) > 18 {
+				name = name[:15] + "..."
+			}
+			lines = append(lines, dimStyle.Render(fmt.Sprintf("  %-18s ↑%s ↓%s", name, formatBytes(iface.bytesSent), formatBytes(iface.bytesRecv))))
+		}
+	}
 	return newCardStyle(w).Render(strings.Join(lines, "\n"))
 }
 
 func (m model) viewProcs(w int) string {
 	s := m.stats
 	nameW := 16
-	procBarW := max(3, min(15, w-4-nameW-7-2))
+	procBarW := max(3, min(12, w-4-nameW-16))
 
-	lines := []string{accentStyle.Render("▶  Top Processes"), ""}
+	lines := []string{
+		accentStyle.Render("▶  Top Processes") + dimStyle.Render(fmt.Sprintf("  (%d total)", s.procCount)),
+		"",
+		dimStyle.Render(fmt.Sprintf("%-*s %-*s %6s %5s", nameW, "Process", procBarW, "CPU", "CPU%", "Mem%")),
+	}
 	for i := 0; i < maxProcesses; i++ {
 		if i < len(s.topProcs) {
 			p := s.topProcs[i]
@@ -416,7 +639,7 @@ func (m model) viewProcs(w int) string {
 				name = name[:nameW-3] + "..."
 			}
 			b := procBar(p.cpuPercent, procBarW)
-			lines = append(lines, fmt.Sprintf("%-*s %s %5.1f%%", nameW, name, b, p.cpuPercent))
+			lines = append(lines, fmt.Sprintf("%-*s %s %5.1f%% %4.1f%%", nameW, name, b, p.cpuPercent, p.memPercent))
 		} else {
 			lines = append(lines, dimStyle.Render("·"))
 		}
@@ -426,14 +649,91 @@ func (m model) viewProcs(w int) string {
 
 func (m model) viewSys(w int) string {
 	s := m.stats
+
+	bootTimeStr := ""
+	if s.bootTime > 0 {
+		bt := time.Unix(int64(s.bootTime), 0)
+		bootTimeStr = bt.Format("2006-01-02 15:04")
+	}
+
 	lines := []string{
 		accentStyle.Render("ℹ  System"),
 		"",
 		labelStyle.Render("Uptime   ") + valueStyle.Render(formatUptime(s.uptime)),
+		labelStyle.Render("Boot     ") + dimStyle.Render(bootTimeStr),
 		labelStyle.Render("OS       ") + valueStyle.Render(s.osVersion),
-		labelStyle.Render("Host     ") + valueStyle.Render(s.hostname),
-		labelStyle.Render("Arch     ") + valueStyle.Render(runtime.GOARCH),
-		labelStyle.Render("Runtime  ") + dimStyle.Render(runtime.Version()),
+	}
+	if s.winBuild != "" {
+		lines = append(lines, labelStyle.Render("Build    ")+dimStyle.Render(s.winBuild))
+	}
+	lines = append(lines,
+		labelStyle.Render("Host     ")+valueStyle.Render(s.hostname),
+		labelStyle.Render("Arch     ")+valueStyle.Render(runtime.GOARCH),
+	)
+	if s.sysMfg != "" {
+		lines = append(lines, labelStyle.Render("Vendor   ")+dimStyle.Render(s.sysMfg))
+	}
+	if s.sysModel != "" {
+		lines = append(lines, labelStyle.Render("Model    ")+dimStyle.Render(s.sysModel))
+	}
+	lines = append(lines, labelStyle.Render("Runtime  ")+dimStyle.Render(runtime.Version()))
+	return newCardStyle(w).Render(strings.Join(lines, "\n"))
+}
+
+func (m model) viewGPU(w int) string {
+	s := m.stats
+	lines := []string{
+		accentStyle.Render("◈  GPU"),
+		"",
+	}
+
+	if len(s.gpus) == 0 {
+		lines = append(lines, dimStyle.Render("No GPU detected"))
+	} else {
+		for i, gpu := range s.gpus {
+			if i > 0 {
+				lines = append(lines, "")
+			}
+			name := gpu.name
+			maxLen := max(10, w-8)
+			if len(name) > maxLen {
+				name = name[:maxLen-3] + "..."
+			}
+			lines = append(lines, valueStyle.Render(name))
+			if gpu.vram != "" && gpu.vram != "0 B" {
+				lines = append(lines, labelStyle.Render("VRAM    ")+dimStyle.Render(gpu.vram))
+			}
+			if gpu.driver != "" {
+				lines = append(lines, labelStyle.Render("Driver  ")+dimStyle.Render(gpu.driver))
+			}
+		}
+	}
+	return newCardStyle(w).Render(strings.Join(lines, "\n"))
+}
+
+func (m model) viewBattery(w, gw int) string {
+	s := m.stats
+	lines := []string{
+		accentStyle.Render("🔋 Battery"),
+		"",
+	}
+
+	if !s.battery.present {
+		lines = append(lines,
+			dimStyle.Render("No battery detected"),
+			"",
+			dimStyle.Render("Desktop/AC powered"),
+		)
+	} else {
+		pct := float64(s.battery.percent)
+		status := "Discharging"
+		if s.battery.charging {
+			status = "Charging"
+		}
+		lines = append(lines,
+			labelStyle.Render("Level  ")+bar(pct, gw)+valueStyle.Render(fmt.Sprintf(" %d%%", s.battery.percent)),
+			labelStyle.Render("Status ")+valueStyle.Render(status),
+		)
 	}
 	return newCardStyle(w).Render(strings.Join(lines, "\n"))
 }
