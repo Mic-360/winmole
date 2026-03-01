@@ -299,6 +299,43 @@ function Show-Checkbox {
     $cursor = 0
     $running = $true
 
+    $getItemValue = {
+        param($obj, [string]$key)
+        if ($null -eq $obj) { return $null }
+        if ($obj -is [hashtable]) {
+            if ($obj.ContainsKey($key)) { return $obj[$key] }
+            return $null
+        }
+        if ($null -ne $obj.PSObject -and $null -ne $obj.PSObject.Properties[$key]) {
+            return $obj.$key
+        }
+        return $null
+    }
+
+    $setSelected = {
+        param($obj, [bool]$value)
+        if ($null -eq $obj) { return }
+        if ($obj -is [hashtable]) {
+            $obj['Selected'] = $value
+            return
+        }
+        if ($null -ne $obj.PSObject -and $null -ne $obj.PSObject.Properties['Selected']) {
+            $obj.Selected = $value
+        }
+    }
+
+    $toScalarString = {
+        param($value)
+        if ($null -eq $value) { return "" }
+        if ($value -is [string]) { return $value }
+        if ($value -is [System.Collections.IEnumerable]) {
+            $arr = @($value)
+            if ($arr.Count -eq 0) { return "" }
+            return [string]$arr[0]
+        }
+        return [string]$value
+    }
+
     [Console]::CursorVisible = $false
 
     try {
@@ -306,11 +343,30 @@ function Show-Checkbox {
         $ErrorActionPreference = 'Stop'
         $startTop = [Console]::CursorTop
 
+        # Initial flush (best-effort)
+        try { $Host.UI.RawUI.FlushInputBuffer() } catch {
+            try { while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) } } catch { }
+        }
+
+        $firstFrame = $true
+
         while ($running) {
             [Console]::SetCursorPosition(0, $startTop)
 
             $width = Get-TerminalWidth
-            $totalColWidth = ($Columns | Measure-Object -Property Width -Sum).Sum + ($Columns.Count * 3) + 6
+
+            [int]$columnsWidthSum = 0
+            foreach ($col in $Columns) {
+                $colWidth = 0
+                if ($col -is [hashtable] -and $col.ContainsKey('Width')) {
+                    $colWidth = [int]$col['Width']
+                } elseif ($null -ne $col.PSObject -and $null -ne $col.PSObject.Properties['Width']) {
+                    $colWidth = [int]$col.Width
+                }
+                $columnsWidthSum += $colWidth
+            }
+
+            $totalColWidth = $columnsWidthSum + ($Columns.Count * 3) + 6
             $boxWidth = [Math]::Min([Math]::Max($totalColWidth, $Title.Length + 8), $width - 4)
 
             # Title bar
@@ -337,7 +393,8 @@ function Show-Checkbox {
                 $item = $Items[$i]
                 $isSelected = $i -eq $cursor
 
-                if ($item.Selected) {
+                $itemIsChecked = [bool](& $getItemValue $item 'Selected')
+                if ($itemIsChecked) {
                     $check = "$($C.Green)☑$($C.Reset)"
                 } else {
                     $check = "$($C.Grey)☐$($C.Reset)"
@@ -345,9 +402,20 @@ function Show-Checkbox {
 
                 $line = "$check "
                 foreach ($col in $Columns) {
-                    $val = $item[$col.Key]
+                    $val = & $getItemValue $item $col.Key
                     if ($null -eq $val) { $val = "" }
-                    $valStr = $val.ToString()
+
+                    $valStr = & $toScalarString $val
+
+                    # Clamp to fixed column width so rows cannot overflow the right border
+                    if ($valStr.Length -gt $col.Width) {
+                        if ($col.Width -gt 1) {
+                            $valStr = $valStr.Substring(0, $col.Width - 1) + "…"
+                        } else {
+                            $valStr = $valStr.Substring(0, $col.Width)
+                        }
+                    }
+
                     $plainLen = ($valStr -replace "$([char]0x1b)\[[0-9;]*m", '').Length
                     $padNeeded = [Math]::Max(0, $col.Width - $plainLen)
                     $line += "$valStr$(' ' * $padNeeded)   "
@@ -373,27 +441,55 @@ function Show-Checkbox {
             # Clear any leftover lines
             Write-Host "                                                                              "
 
-            $key = Read-WimoKey -FallbackPrompt "  Selection command"
+            # After rendering the first frame, flush again to discard any
+            # terminal response sequences or stale Enter from Read-Host
+            if ($firstFrame) {
+                $firstFrame = $false
+                Start-Sleep -Milliseconds 150
+                try { $Host.UI.RawUI.FlushInputBuffer() } catch {
+                    try { while ([Console]::KeyAvailable) { [void][Console]::ReadKey($true) } } catch { }
+                }
+            }
+
+            $key = $null
+            try {
+                $key = Read-WimoKey -FallbackPrompt "  Selection command"
+            } catch {
+                Start-Sleep -Milliseconds 50
+                continue
+            }
             if ($null -eq $key) { continue }
 
             switch ($key.VirtualKeyCode) {
                 38 { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $Items.Count - 1 } }  # Up
                 40 { $cursor = if ($cursor -lt $Items.Count - 1) { $cursor + 1 } else { 0 } }  # Down
-                32 { $Items[$cursor].Selected = -not $Items[$cursor].Selected }  # Space
-                13 { $running = $false }  # Enter
+                32 {
+                    $current = [bool](& $getItemValue $Items[$cursor] 'Selected')
+                    & $setSelected $Items[$cursor] (-not $current)
+                }  # Space
+                13 {
+                    # Prevent accidental immediate confirm when nothing is selected
+                    $currentSelectedCount = ($Items | Where-Object { [bool](& $getItemValue $_ 'Selected') }).Count
+                    if ($currentSelectedCount -gt 0) {
+                        $running = $false
+                    }
+                }  # Enter
                 27 { # Escape — deselect all and exit
-                    $Items | ForEach-Object { $_.Selected = $false }
+                    $Items | ForEach-Object { & $setSelected $_ $false }
                     $running = $false
                 }
                 default {
                     switch ($key.Character.ToString().ToLowerInvariant()) {
                         'j' { $cursor = if ($cursor -lt $Items.Count - 1) { $cursor + 1 } else { 0 } }
                         'k' { $cursor = if ($cursor -gt 0) { $cursor - 1 } else { $Items.Count - 1 } }
-                        ' ' { $Items[$cursor].Selected = -not $Items[$cursor].Selected }
-                        'a' { $Items | ForEach-Object { $_.Selected = $true } }
-                        'n' { $Items | ForEach-Object { $_.Selected = $false } }
+                        ' ' {
+                            $current = [bool](& $getItemValue $Items[$cursor] 'Selected')
+                            & $setSelected $Items[$cursor] (-not $current)
+                        }
+                        'a' { $Items | ForEach-Object { & $setSelected $_ $true } }
+                        'n' { $Items | ForEach-Object { & $setSelected $_ $false } }
                         'q' {
-                            $Items | ForEach-Object { $_.Selected = $false }
+                            $Items | ForEach-Object { & $setSelected $_ $false }
                             $running = $false
                         }
                     }
@@ -405,7 +501,7 @@ function Show-Checkbox {
         [Console]::CursorVisible = $true
     }
 
-    return @($Items | Where-Object { $_.Selected })
+    return @($Items | Where-Object { [bool](& $getItemValue $_ 'Selected') })
 }
 
 function Show-Progress {
