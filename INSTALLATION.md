@@ -71,8 +71,8 @@ If you have Go 1.24+ installed, build the `analyze` and `status` interactive TUI
 
 This compiles:
 
-- `analyze.exe` — visual disk space explorer
-- `status.exe` — live system health dashboard
+- `analyze-go.exe` — visual disk space explorer
+- `status-go.exe` — live system health dashboard (card-based sage green TUI)
 
 ### Option 4: Install with Start Menu Shortcut
 
@@ -99,15 +99,15 @@ If you skipped `-BuildFromSource` during install, you can build the Go TUI binar
 make build
 
 # Or manually:
-go build -ldflags="-s -w" -o bin/analyze.exe ./cmd/analyze
-go build -ldflags="-s -w" -o bin/status.exe ./cmd/status
+go build -ldflags="-s -w" -o bin/analyze-go.exe ./cmd/analyze
+go build -ldflags="-s -w" -o bin/status-go.exe ./cmd/status
 ```
 
 Then copy the resulting `.exe` files to your WiMo install directory:
 
 ```powershell
-Copy-Item bin\analyze.exe "$env:LOCALAPPDATA\WiMo\bin\"
-Copy-Item bin\status.exe  "$env:LOCALAPPDATA\WiMo\bin\"
+Copy-Item bin\analyze-go.exe "$env:LOCALAPPDATA\WiMo\bin\"
+Copy-Item bin\status-go.exe  "$env:LOCALAPPDATA\WiMo\bin\"
 ```
 
 ---
@@ -151,12 +151,14 @@ wimo clean --dry-run
 
 ## File Locations
 
-| What         | Path                           |
-| ------------ | ------------------------------ |
-| Scripts      | `%LOCALAPPDATA%\WiMo\`         |
-| Config       | `%APPDATA%\WiMo\config.json`   |
-| Go binaries  | `%LOCALAPPDATA%\WiMo\bin\`     |
-| CMD launcher | `%LOCALAPPDATA%\WiMo\wimo.cmd` |
+| What         | Path                                     |
+| ------------ | ---------------------------------------- |
+| Scripts      | `%LOCALAPPDATA%\WiMo\`                   |
+| Config       | `%APPDATA%\WiMo\config.json`             |
+| Go binaries  | `%LOCALAPPDATA%\WiMo\bin\`               |
+| CMD launcher | `%LOCALAPPDATA%\WiMo\wimo.cmd`           |
+| Status TUI   | `%LOCALAPPDATA%\WiMo\bin\status-go.exe`  |
+| Analyze TUI  | `%LOCALAPPDATA%\WiMo\bin\analyze-go.exe` |
 
 ---
 

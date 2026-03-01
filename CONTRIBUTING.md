@@ -65,10 +65,13 @@ cmd/
 
 ### Key Conventions
 
-- **Colors** are defined in `$script:C` in `base.ps1` using ANSI 256-color codes
+- **Colors** are defined in `$script:C` in `base.ps1` using ANSI 256-color codes (sage green palette)
 - **Safe deletion** always goes through `Remove-SafePath` or `Remove-SafeGlob` in `file_ops.ps1`
-- **UI elements** use box-drawing characters (`┌─┐│└─┘`) and ANSI escape sequences
-- **Go TUI** components use the Bubble Tea architecture (Model → Update → View)
+- **Fast I/O** uses `System.IO.Directory.EnumerateFiles/EnumerateDirectories` instead of `Get-ChildItem` for scanning
+- **Parallel operations** use runspace pools in `clean.ps1` and `purge.ps1` (note: runspaces are isolated and cannot access session cmdlets)
+- **UI elements** use box-drawing characters (`╭─╮│╰─╯`) and ANSI escape sequences
+- **Interactive menu** is a persistent split-pane loop — menu returns after every command
+- **Go TUI** components use the Bubble Tea architecture (Model → Update → View) with Lip Gloss styling
 
 ## How to Contribute
 
@@ -119,8 +122,8 @@ The Go binaries in `cmd/` use [Bubble Tea](https://github.com/charmbracelet/bubb
 
 ```powershell
 # Build after changes
-go build -ldflags="-s -w" -o bin/analyze.exe ./cmd/analyze
-go build -ldflags="-s -w" -o bin/status.exe ./cmd/status
+go build -ldflags="-s -w" -o bin/analyze-go.exe ./cmd/analyze
+go build -ldflags="-s -w" -o bin/status-go.exe ./cmd/status
 
 # Or use make
 make build

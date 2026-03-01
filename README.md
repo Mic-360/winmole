@@ -21,7 +21,7 @@
 
 WiMo is an all-in-one **system maintenance CLI toolkit for Windows**. Think **CleanMyMac + AppCleaner + DaisyDisk + iStat Menus** — but for Windows, free, and open source.
 
-Built with PowerShell and Go for a fast, colorful terminal experience with interactive menus, real-time dashboards, and safe file operations.
+Built with PowerShell and Go for a fast, colorful terminal experience with a persistent interactive menu, real-time dashboards, .NET-accelerated file operations, and parallel scanning.
 
 ```
       ██████              ██████
@@ -48,7 +48,11 @@ Built with PowerShell and Go for a fast, colorful terminal experience with inter
 
 ### Highlights
 
-- **Interactive TUI** — vim-style navigation (`j`/`k`), checkboxes, progress bars, box-drawing menus
+- **Split-pane persistent menu** — left navigation panel + right context panel; menu stays visible and returns after every command
+- **Interactive TUI** — vim-style navigation (`j`/`k`), checkboxes, progress bars, responsive box-drawing layout
+- **Modern Go dashboards** — card-based status TUI with sage green Catppuccin palette, responsive breakpoints, health score badge
+- **.NET-accelerated I/O** — `System.IO.Directory.EnumerateFiles/EnumerateDirectories` replaces `Get-ChildItem` for fast scanning
+- **Parallel execution** — runspace pools for concurrent size calculation and deletion in `clean` and `purge`
 - **4-layer safe delete** — protected paths, user data patterns, recycle bin fallback, dry-run preview
 - **28+ cleanup targets** — user-level caches, browser data, package managers, dev tools
 - **Smart uninstaller** — merges apps from Windows Registry, winget, and local programs into one list
@@ -168,31 +172,43 @@ WiMo uses a **4-layer safety system** before deleting any file:
 
 ### Go TUI Components
 
-The `analyze` and `status` commands use Go binaries built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) for rich terminal UIs:
+The `analyze` and `status` commands use Go binaries built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss) for rich terminal UIs:
 
-- **Analyze** — concurrent directory scanning with goroutines, live-updating size display, alt-screen mode
-- **Status** — 2-second refresh tick, CPU/memory/disk/network monitoring via [gopsutil](https://github.com/shirou/gopsutil), health score calculation
+- **Analyze** (`analyze-go.exe`) — concurrent directory scanning with goroutines, live-updating size display, alt-screen mode
+- **Status** (`status-go.exe`) — card-based dashboard with sage green Catppuccin palette, 6 cards (CPU, Memory, Disk, Network, Processes, System), health score badge, responsive layout (stacks to single column below 70 columns), 2-second auto-refresh via [gopsutil](https://github.com/shirou/gopsutil)
 
 These binaries are optional. If not built, the PowerShell wrappers will show a helpful message with build instructions.
 
+### Performance Optimizations
+
+- **File scanning**: `System.IO.Directory.EnumerateFiles()` and `EnumerateDirectories()` replace `Get-ChildItem -Recurse` for significantly faster directory walking
+- **Parallel sizing**: `clean` and `purge` use PowerShell runspace pools (up to 16 threads) for concurrent size calculations
+- **Parallel deletion**: `purge` deletes selected artifacts concurrently via runspace pools
+- **Safe fallback**: `System.IO.Directory.Delete()` with `Remove-Item` fallback for locked files
+
 ## Screenshots
 
-### Interactive Menu
+### Interactive Menu (Split-Pane)
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  🐭 WiMo  · Windows System Optimizer                 │
-├──────────────────────────────────────────────────────┤
-│  ▶  🧹  Clean System      Free disk space           │
-│     🗑️  Uninstall Apps     Remove + leftovers       │
-│     ⚡  Optimize System    Speed & refresh           │
-│     📁  Analyze Disk       Visual explorer          │
-│     📊  Live Status        Health dashboard         │
-│     🔥  Purge Projects    Dev artifact junk         │
-├──────────────────────────────────────────────────────┤
-│  ↑↓ / jk navigate  ·  Enter select  ·  q quit        │
-└──────────────────────────────────────────────────────┘
+╭────────────────────────────╮ ╭────────────────────────────────────────╮
+│  WiMo v1.0.0               │ │  Clean System                          │
+├────────────────────────────┤ ├────────────────────────────────────────┤
+│                            │ │                                        │
+│ > [~] Clean System         │ │  Deep system cleanup                   │
+│   [-] Uninstall Apps       │ │                                        │
+│   [*] Optimize System      │ │  Removes temp files, browser caches,   │
+│   [+] Analyze Disk         │ │  Windows Update leftovers, thumbnail   │
+│   [=] Live Status          │ │  cache, and recycle bin contents.       │
+│   [!] Purge Projects       │ │                                        │
+│                            │ │  Flags: --dry-run  --whitelist         │
+├────────────────────────────┤ │                                        │
+│  up/dn · Enter · q quit    │ │                                        │
+╰────────────────────────────╯ ╰────────────────────────────────────────╯
+  ✓ Last: Clean System
 ```
+
+The menu is **persistent** — after a command finishes, press any key to return. On narrow terminals (<67 columns), the right info panel collapses to a single navigation panel.
 
 ### Clean (Dry Run)
 
