@@ -78,10 +78,10 @@ type gpuInfo struct {
 }
 
 type batteryInfo struct {
-	percent   int
-	charging  bool
-	present   bool
-	status    string
+	percent  int
+	charging bool
+	present  bool
+	status   string
 }
 
 type diskPartInfo struct {
@@ -94,7 +94,7 @@ type diskPartInfo struct {
 }
 
 type netIfaceInfo struct {
-	name     string
+	name      string
 	bytesSent uint64
 	bytesRecv uint64
 }
