@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/spf13/cobra"
 
 	"github.com/mic-360/wimo/internal/services"
@@ -68,9 +65,5 @@ func runWithScreen(screen state.Screen) error {
 	if debugFlag {
 		container.Logger.Info("cli", "debug mode enabled")
 	}
-	if err := tui.Run(container, screen); err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
-		return err
-	}
-	return nil
+	return tui.Run(container, screen)
 }

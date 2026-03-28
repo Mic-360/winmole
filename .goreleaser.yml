@@ -1,4 +1,4 @@
-﻿project_name: winmole
+project_name: winmole
 
 builds:
   - id: winmole

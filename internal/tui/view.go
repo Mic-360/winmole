@@ -20,10 +20,10 @@ func (m Model) View() string {
 	view := lipgloss.JoinVertical(lipgloss.Left, body, footer)
 	if m.store.Palette.Visible {
 		palette := ui.RenderPalette(m.theme, "Command palette", m.paletteInput.View(), m.paletteList.View(), m.width, m.height)
-		return view + "\n" + palette
+		return m.theme.App.Render(view + "\n" + palette)
 	}
 	if m.store.Modal.Visible {
-		return view + "\n" + m.renderModal()
+		return m.theme.App.Render(view + "\n" + m.renderModal())
 	}
 	return m.theme.App.Render(view)
 }

@@ -22,9 +22,16 @@ func ComputeLayout(width, height int) Layout {
 	if sidebar < 18 {
 		sidebar = 18
 	}
+	if sidebar >= width {
+		sidebar = width - 1
+	}
+	contentWidth := width - sidebar
+	if contentWidth < 0 {
+		contentWidth = 0
+	}
 	bodyHeight := height - 3
 	if bodyHeight < 10 {
 		bodyHeight = 10
 	}
-	return Layout{Width: width, Height: height, SidebarWidth: sidebar, ContentWidth: width - sidebar, BodyHeight: bodyHeight}
+	return Layout{Width: width, Height: height, SidebarWidth: sidebar, ContentWidth: contentWidth, BodyHeight: bodyHeight}
 }

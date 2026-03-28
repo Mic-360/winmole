@@ -13,6 +13,8 @@ import (
 	"github.com/mic-360/wimo/pkg/util"
 )
 
+var focusCycle = []state.FocusArea{state.FocusSidebar, state.FocusContent}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var spinCmd tea.Cmd
@@ -404,9 +406,13 @@ func (m *Model) updateModal(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd)
 	case "esc", "n":
 		m.closeModal()
 	case "enter", "y":
-		pending := m.store.Modal.Pending
-		m.closeModal()
-		cmds = append(cmds, m.executePending(pending))
+		if m.store.Modal.Kind == "alert" {
+			m.closeModal()
+		} else {
+			pending := m.store.Modal.Pending
+			m.closeModal()
+			cmds = append(cmds, m.executePending(pending))
+		}
 	}
 	return *m, tea.Batch(cmds...)
 }
@@ -450,12 +456,17 @@ func (m *Model) setScreen(screen state.Screen) {
 }
 
 func (m *Model) toggleFocus(forward bool) {
-	if m.store.Focus == state.FocusSidebar {
-		m.store.Focus = state.FocusContent
-		return
+	current := 0
+	for i, f := range focusCycle {
+		if f == m.store.Focus {
+			current = i
+			break
+		}
 	}
-	if m.store.Focus == state.FocusContent {
-		m.store.Focus = state.FocusSidebar
+	if forward {
+		m.store.Focus = focusCycle[(current+1)%len(focusCycle)]
+	} else {
+		m.store.Focus = focusCycle[(current-1+len(focusCycle))%len(focusCycle)]
 	}
 }
 

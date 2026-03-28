@@ -1,4 +1,4 @@
-﻿BINARY=winmole
+BINARY=winmole
 LDFLAGS=-ldflags="-s -w"
 
 .PHONY: build build-local build-windows-amd64 build-windows-arm64 fmt vet test clean

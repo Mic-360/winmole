@@ -65,7 +65,14 @@ func Dashboard(theme ui.Theme, store state.Store, width int) string {
 		ui.Card(theme, "Active signals", strings.Join(alertLines, "\n"), leftWidth),
 	)
 	if width < 110 {
-		return lipgloss.JoinVertical(lipgloss.Left, headline, rowOne, rowTwo)
+		singleWidth := width
+		return lipgloss.JoinVertical(lipgloss.Left,
+			headline,
+			ui.Card(theme, "System overview", statusBody, singleWidth),
+			ui.Card(theme, "Environment", envBody, singleWidth),
+			ui.Card(theme, "Quick commands", quickBody, singleWidth),
+			ui.Card(theme, "Active signals", strings.Join(alertLines, "\n"), singleWidth),
+		)
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, headline, rowOne, rowTwo)
 }

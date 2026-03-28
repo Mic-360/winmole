@@ -1,9 +1,9 @@
-﻿# Winmole installer
+# Winmole installer
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\WiMo",
     [switch]$AddToPath = $true,
     [switch]$CreateShortcut = $false,
-    [switch]$BuildFromSource = $true
+    [switch]$BuildFromSource = $false
 )
 
 $ErrorActionPreference = 'Stop'

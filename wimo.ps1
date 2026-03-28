@@ -1,4 +1,4 @@
-﻿param(
+param(
     [string]$BinaryPath = (Join-Path $PSScriptRoot 'winmole.exe')
 )
 
@@ -7,7 +7,7 @@ if (Test-Path $BinaryPath) {
     exit $LASTEXITCODE
 }
 
-if (Get-Command go -ErrorAction SilentlyContinue) {
+if ((Get-Command go -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $PSScriptRoot 'go.mod'))) {
     Push-Location $PSScriptRoot
     try {
         go run . @args
@@ -17,5 +17,5 @@ if (Get-Command go -ErrorAction SilentlyContinue) {
     }
 }
 
-Write-Error 'winmole.exe was not found. Build the Go application with: go build -o bin\winmole.exe .'
+Write-Error "$BinaryPath was not found. Build the Go application with: go build -o $BinaryPath ."
 exit 1
