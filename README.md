@@ -1,250 +1,231 @@
-<p align="center">
-	<img src="winmole-logo.png" alt="WiMo Logo" width="256">
-  <h1 align="center">🐭 WiMo</h1>
-  <p align="center"><strong>Windows System Optimizer — Mole for Windows</strong></p>
-  <p align="center">
-    <a href="#features">Features</a> ·
-    <a href="INSTALLATION.md">Install</a> ·
-    <a href="#usage">Usage</a> ·
-    <a href="CONTRIBUTING.md">Contribute</a>
-  </p>
-  <p align="center">
-    <img src="https://img.shields.io/badge/platform-Windows%2010%2B-blue?style=flat-square" alt="Platform">
-    <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
-    <img src="https://img.shields.io/badge/powershell-5.1%2B-5391FE?style=flat-square&logo=powershell&logoColor=white" alt="PowerShell">
-    <img src="https://img.shields.io/badge/go-1.24-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
-    <img src="https://img.shields.io/badge/version-1.0.0-orange?style=flat-square" alt="Version">
-  </p>
-</p>
+﻿# Winmole
 
----
+Winmole is a Windows-first terminal maintenance application built with Go, Cobra, Bubble Tea, Lip Gloss, and the Charm ecosystem.
 
-WiMo is an all-in-one **system maintenance CLI toolkit for Windows**. Think **CleanMyMac + AppCleaner + DaisyDisk + iStat Menus** — but for Windows, free, and open source.
+It provides a single keyboard-driven TUI for:
+- live system status and health
+- project analysis and artifact purge
+- deep-clean target selection
+- uninstall inventory and removal
+- explicit optimization task selection
+- runtime logs, settings, and help docs
 
-Built with PowerShell and Go for a fast, colorful terminal experience with a persistent interactive menu, real-time dashboards, .NET-accelerated file operations, and parallel scanning.
+The current app is centered around one unified `winmole.exe` binary. The old split PowerShell-plus-multiple-binaries flow has been replaced with one full-screen terminal application.
 
+## Highlights
+
+- Bubble Tea application shell with sidebar navigation, modal dialogs, and command palette
+- Windows-optimized terminal layout for Windows Terminal, PowerShell, CMD, and WezTerm
+- Selection-first workflows for clean, uninstall, optimize, and purge
+- Project-aware artifact scanning for Node, Next.js, Python, Go, Rust, Java, Flutter, .NET, and more
+- Searchable runtime logs and in-app markdown help
+- Cobra CLI entrypoint with TUI-first command aliases
+
+## Requirements
+
+- Windows 10 or Windows 11
+- PowerShell 5.1+ or PowerShell 7+
+- Go 1.24+ if you want to build or run from source
+
+## Install
+
+### Option 1: Install locally with the provided installer
+
+From the repository root:
+
+```powershell
+.\install.ps1
 ```
-      ██████              ██████
-    ██▓▓▓▓▓▓██          ██▓▓▓▓▓▓██
-    ██▓▓▓▓██████████████████▓▓▓▓██
-      ████░░░░░░░░░░░░░░░░░░████
-      ██░░░░░░ ◉ ░░░░ ◉ ░░░░░░██
-      ██░░░░░░░░░░░░░░░░░░░░░░██
-        ██░░░░░░░░░░░░░░░░░░██
-          ████░░░░░░░░░░████
-            ██████████████
+
+This installs `winmole.exe` into `%LOCALAPPDATA%\WiMo`, creates `winmole.cmd` and `wimo.cmd`, and can add the install directory to your user `PATH`.
+
+After installation, open a new terminal and run:
+
+```powershell
+winmole
 ```
 
-## Features
-
-| Command          | What it does                                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------- |
-| `wimo clean`     | Deep system cleanup — temp files, browser caches, Windows Update leftovers, system logs  |
-| `wimo uninstall` | Interactive app uninstaller with registry + winget integration and leftover cleanup      |
-| `wimo optimize`  | System optimization — flush DNS, clear icon/thumbnail caches, trim SSD, restart services |
-| `wimo analyze`   | Visual disk space explorer — Go TUI with real-time directory scanning (bubbletea)        |
-| `wimo status`    | Live system health dashboard — CPU, RAM, disk, network with auto-refresh (bubbletea)     |
-| `wimo purge`     | Clean project build artifacts — node_modules, .next, target, **pycache**, Flutter, etc.  |
-
-### Highlights
-
-- **Split-pane persistent menu** — left navigation panel + right context panel; menu stays visible and returns after every command
-- **Interactive TUI** — vim-style navigation (`j`/`k`), checkboxes, progress bars, responsive box-drawing layout
-- **Modern Go dashboards** — card-based status and analyze TUI with muted Catppuccin-inspired palette, responsive breakpoints, health score badge
-- **.NET-accelerated I/O** — `System.IO.Directory.EnumerateFiles/EnumerateDirectories` replaces `Get-ChildItem` for fast scanning
-- **Parallel execution** — runspace pools for concurrent size calculation and deletion in `clean` and `purge`
-- **4-layer safe delete** — protected paths, user data patterns, recycle bin fallback, dry-run preview
-- **28+ cleanup targets** — user-level caches, browser data, package managers, dev tools
-- **Smart uninstaller** — merges apps from Windows Registry, winget, and local programs into one list
-- **Resilient uninstall selection** — automatic fallback command input mode when raw key capture is unavailable in the terminal
-- **Admin-aware** — badges admin-required tasks, skips them gracefully when running as standard user
-- **ANSI color output** — 256-color palette with sage green branding, works on Windows 10+ terminals
-- **Robust hardware detection** — status mode uses WMIC + CIM fallback for GPU and battery telemetry on more Windows setups
-- **Winget ready** — includes a winget manifest for package distribution
-
-## Usage
-
-Launch the interactive menu:
+You can also use the legacy alias:
 
 ```powershell
 wimo
 ```
 
-Or run commands directly:
+### Option 2: Build and run the binary yourself
 
 ```powershell
-# Deep system cleanup
-wimo clean
-
-# Preview what would be deleted (no files removed)
-wimo clean --dry-run
-
-# Interactive app uninstaller
-wimo uninstall
-
-# System optimization
-wimo optimize
-
-# Visual disk analyzer (Go TUI)
-wimo analyze
-
-# Live system dashboard
-wimo status
-
-# Clean build artifacts from project directories
-wimo purge
-wimo purge --paths "C:\Projects"
-wimo purge --depth 5
-
-# Self-update
-wimo update
-
-# Uninstall WiMo
-wimo remove
+go build -o .\bin\winmole.exe .
+.\bin\winmole.exe
 ```
 
-### Flags
+## Run Without Installing
 
-| Flag              | Scope   | Description                                    |
-| ----------------- | ------- | ---------------------------------------------- |
-| `--help`, `-h`    | Global  | Show help message                              |
-| `--version`, `-v` | Global  | Show version                                   |
-| `--debug`         | Global  | Enable verbose debug logging                   |
-| `--dry-run`       | `clean` | Preview cleanup plan without deleting anything |
-| `--whitelist`     | `clean` | Manage protected paths                         |
-| `--paths`         | `purge` | Specify custom scan directories                |
-| `--depth N`       | `purge` | Limit recursion depth (default: 8)             |
-
-## Quick Install
+### Run directly from source with Go
 
 ```powershell
-# Clone and install
-git clone https://github.com/mic-360/winmole.git
-cd winmole
-.\install.ps1
+go run .
 ```
 
-For detailed installation options, build-from-source instructions, and troubleshooting, see **[INSTALLATION.md](INSTALLATION.md)**.
+### Run through the repository wrapper
 
-## Requirements
-
-- **Windows 10** version 1809+ (for ANSI/VT100 terminal support)
-- **PowerShell 5.1+** (ships with Windows) or PowerShell 7+
-- **Go 1.24+** (optional — only needed to build the `analyze` and `status` TUI binaries)
-
-## Terminal Compatibility
-
-- Recommended: **Windows Terminal** or **PowerShell 7+** terminal hosts
-- Supported: **VS Code integrated terminal**
-- If raw key mode is unavailable for interactive selection, WiMo now automatically switches to command input mode (`j/k/up/down/space/enter/a/n/q`).
-
-## Project Structure
-
+```powershell
+.\wimo.ps1
 ```
+
+The wrapper will try `winmole.exe` first and fall back to `go run .` if Go is available.
+
+### Run a locally built binary without adding it to PATH
+
+```powershell
+go build -o .\bin\winmole.exe .
+.\bin\winmole.exe
+```
+
+## Usage
+
+### Launch the main TUI
+
+```powershell
+winmole
+```
+
+### Open a specific screen directly
+
+```powershell
+winmole dashboard
+winmole projects
+winmole actions
+winmole logs
+winmole settings
+winmole help
+```
+
+### Command aliases
+
+These aliases currently route into the unified TUI:
+
+```powershell
+winmole status
+winmole analyze
+winmole purge
+winmole clean
+winmole uninstall
+winmole optimize
+```
+
+## In-App Navigation
+
+Core bindings:
+
+- `Ctrl+P`: command palette
+- `Tab`: switch between sidebar and screen content
+- `Shift+Tab`: move focus back
+- `↑/↓` or `j/k`: move
+- `Enter`: select or drill in
+- `Esc` / `Backspace`: back or close modal
+- `Space`: toggle selection
+- `x`: run selected workflow
+- `/`: filter lists or search logs
+- `?`: open help
+
+Full keybindings live in [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md).
+
+## Workflows
+
+### Dashboard
+
+The dashboard replaces the old separate status window with a live system overview showing:
+- CPU, memory, disk, and network activity
+- health scoring
+- environment details
+- active alerts and quick commands
+
+### Projects
+
+The Projects screen combines the old analyze/purge concepts into one flow:
+- detect project roots across configured scan paths
+- analyze top space consumers per project
+- detect build artifacts and caches
+- select exactly what to purge before execution
+
+### Actions
+
+The Actions screen is split into three panes:
+- `Clean`: select cleanup targets before removal
+- `Uninstall`: review a filtered uninstallable app inventory and select apps to remove
+- `Optimize`: choose which optimization tasks to run instead of applying everything automatically
+
+### Logs
+
+The Logs screen shows runtime events from scans and task execution, with filtering and pause/resume support.
+
+### Settings
+
+The Settings screen lets you edit:
+- scan paths
+- purge depth
+- refresh interval
+- winget integration
+- update checks
+
+## Build From Source
+
+### Local build
+
+```powershell
+go build -o .\bin\winmole.exe .
+```
+
+### Cross-build Windows release binaries
+
+```powershell
+make build-windows-amd64
+make build-windows-arm64
+```
+
+### GoReleaser
+
+The repo includes `.goreleaser.yml` for Windows release packaging.
+
+## Verification
+
+The refactor has been verified with:
+
+```powershell
+gofmt -w main.go cmd internal pkg
+go vet ./...
+go test ./...
+go build -o .\bin\winmole.exe .
+```
+
+## Repository Layout
+
+```text
 winmole/
-├── wimo.ps1              # Entry point — arg parser & command dispatcher
-├── wimo.cmd              # CMD wrapper for PATH-based invocation
-├── install.ps1           # Installer (PATH, config, optional Go build)
-├── Makefile              # Go binary build targets
-├── go.mod                # Go module definition
-├── bin/
-│   ├── clean.ps1         # Deep system cleanup (28+ targets)
-│   ├── uninstall.ps1     # Interactive app uninstaller
-│   ├── optimize.ps1      # System optimization (11 tasks)
-│   ├── analyze.ps1       # Go TUI wrapper — disk analyzer
-│   ├── status.ps1        # Go TUI wrapper — health dashboard
-│   └── purge.ps1         # Build artifact cleaner
-├── lib/core/
-│   ├── common.ps1        # Module loader (dot-sources all core libs)
-│   ├── base.ps1          # Constants, colors, ASCII logo, config
-│   ├── log.ps1           # Debug logging
-│   ├── file_ops.ps1      # Safe file operations (4-layer protection)
-│   └── ui.ps1            # TUI primitives (menus, checkboxes, progress)
-├── cmd/
-│   ├── analyze/main.go   # Disk analyzer TUI (bubbletea + lipgloss)
-│   └── status/main.go    # System health dashboard (bubbletea + gopsutil)
-└── winget-manifest/
-    └── mic-360.WiMo.yaml # Winget package manifest
+├── cmd/                  Cobra entrypoints
+├── internal/
+│   ├── screens/          Screen renderers
+│   ├── services/         Runtime, clean, uninstall, optimize, purge, config, logger
+│   ├── state/            Shared DTOs and app state
+│   ├── tui/              Bubble Tea app shell
+│   └── ui/               Theme, layout, modal, keymap, components
+├── pkg/util/             Shared formatting and fuzzy helpers
+├── docs/                 Architecture, components, keybindings, developer guide
+├── install.ps1           Installer for local Windows use
+├── wimo.ps1              PowerShell wrapper
+├── wimo.cmd              CMD wrapper / alias
+├── winmole.cmd           Primary command wrapper
+└── main.go               Main application entrypoint
 ```
 
-## How It Works
+## Documentation
 
-### Safe File Operations
-
-WiMo uses a **4-layer safety system** before deleting any file:
-
-1. **Protected path check** — system-critical directories (`C:\Windows`, `C:\Program Files`, etc.) are never touched
-2. **User data pattern check** — Documents, Desktop, Downloads, Pictures, etc. are always preserved
-3. **Recycle bin fallback** — files go to Recycle Bin when possible instead of permanent deletion
-4. **Dry-run preview** — `--dry-run` shows exactly what would be removed before committing
-
-### Go TUI Components
-
-The `analyze` and `status` commands use Go binaries built with [Bubble Tea](https://github.com/charmbracelet/bubbletea) and [Lip Gloss](https://github.com/charmbracelet/lipgloss) for rich terminal UIs:
-
-- **Analyze** (`analyze-go.exe`) — concurrent directory scanning with goroutines, live-updating size display, alt-screen mode
-- **Status** (`status-go.exe`) — card-based dashboard with sage green Catppuccin palette, 6 cards (CPU, Memory, Disk, Network, Processes, System), health score badge, responsive layout (stacks to single column below 70 columns), 2-second auto-refresh via [gopsutil](https://github.com/shirou/gopsutil)
-
-These binaries are optional. If not built, the PowerShell wrappers will show a helpful message with build instructions.
-
-### Performance Optimizations
-
-- **File scanning**: `System.IO.Directory.EnumerateFiles()` and `EnumerateDirectories()` replace `Get-ChildItem -Recurse` for significantly faster directory walking
-- **Parallel sizing**: `clean` and `purge` use PowerShell runspace pools (up to 16 threads) for concurrent size calculations
-- **Parallel deletion**: `purge` deletes selected artifacts concurrently via runspace pools
-- **Safe fallback**: `System.IO.Directory.Delete()` with `Remove-Item` fallback for locked files
-
-## Screenshots
-
-### Interactive Menu (Split-Pane)
-
-```
-╭────────────────────────────╮ ╭────────────────────────────────────────╮
-│  WiMo v1.0.0               │ │  Clean System                          │
-├────────────────────────────┤ ├────────────────────────────────────────┤
-│                            │ │                                        │
-│ > [~] Clean System         │ │  Deep system cleanup                   │
-│   [-] Uninstall Apps       │ │                                        │
-│   [*] Optimize System      │ │  Removes temp files, browser caches,   │
-│   [+] Analyze Disk         │ │  Windows Update leftovers, thumbnail   │
-│   [=] Live Status          │ │  cache, and recycle bin contents.       │
-│   [!] Purge Projects       │ │                                        │
-│                            │ │  Flags: --dry-run  --whitelist         │
-├────────────────────────────┤ │                                        │
-│  up/dn · Enter · q quit    │ │                                        │
-╰────────────────────────────╯ ╰────────────────────────────────────────╯
-  ✓ Last: Clean System
-```
-
-The menu is **persistent** — after a command finishes, press any key to return. On narrow terminals (<67 columns), the right info panel collapses to a single navigation panel.
-
-### Clean (Dry Run)
-
-```
-  🧹  Scanning system caches...
-
-  ✓ Windows Temp ············· 3.0 GB
-  ✓ User Temp ················ 512.4 MB
-  ✓ Chrome Cache ············· 359.0 MB
-  ✓ Edge Cache ··············· 377.1 MB
-  ⊘ Firefox Cache ··········· not found
-
-  ┌──────────────────────────────────────┐
-  │  Would free: 7.0 GB                 │
-  │  Free now: 653.1 GB                 │
-  └──────────────────────────────────────┘
-```
+- [docs/TUI_ARCHITECTURE.md](docs/TUI_ARCHITECTURE.md)
+- [docs/UI_COMPONENTS.md](docs/UI_COMPONENTS.md)
+- [docs/KEYBINDINGS.md](docs/KEYBINDINGS.md)
+- [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md)
+- [docs/REPOSITORY_ANALYSIS.md](docs/REPOSITORY_ANALYSIS.md)
 
 ## License
 
-[MIT](LICENSE) — free for personal and commercial use.
-
-## Contributing
-
-Contributions are welcome! See **[CONTRIBUTING.md](CONTRIBUTING.md)** for guidelines.
-
-## Acknowledgments
-
-- Inspired by [Mole](https://github.com/nicehash/mole) (macOS system toolkit by tw93)
-- Go TUI powered by [Bubble Tea](https://github.com/charmbracelet/bubbletea) & [Lip Gloss](https://github.com/charmbracelet/lipgloss)
-- System metrics via [gopsutil](https://github.com/shirou/gopsutil)
+[MIT](LICENSE)
